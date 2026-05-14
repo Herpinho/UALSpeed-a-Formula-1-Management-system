@@ -1,6 +1,18 @@
 version: '3.8'
 
 services:
+
+  frontend:
+    container_name: ualspeed-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:3000"  
+    networks:
+      - ualspeed-net
+    restart: unless-stopped
+    
   results-service:
     container_name: results-service
     build: 
