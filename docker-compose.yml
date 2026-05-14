@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  results-service:
+    container_name: results-service
+    build: 
+      context: .
+      dockerfile: results_service/Dockerfile
+    ports:
+      - "5003:5003"
+    depends_on:
+      - postgres-results
+    environment:
+      - DB_NAME=${RESULTS_DB_NAME}
+      - DB_USER=${RESULTS_DB_USER}
+      - DB_PASSWORD=${RESULTS_DB_PASSWORD}
+      - DB_HOST=postgres-results
+      - DB_PORT=${RESULTS_DB_PORT}
+      - RESULTS_SERVICE=${RESULTS_SERVICE}
+      - DATA_SERVICE=${DATA_SERVICE}
+    networks:
+      - ualspeed-net
+
+  postgres-results:
+    image: postgres:15
+    container_name: postgres-results
+    volumes:
+      - ./results_service/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - results_data:/var/lib/postgresql/data
+    restart: always
+    environment:
+      POSTGRES_USER: ${RESULTS_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${RESULTS_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${RESULTS_POSTGRES_DB}
+    ports:
+      - "5433:5432"
+    networks:
+      - ualspeed-net
+
+  data-service:
+    container_name: data-service
+    build:
+      context: .
+      dockerfile: data_service/Dockerfile
+    ports:
+      - "5004:5004"
+    depends_on:
+      - postgres-data
+    environment:
+      - DB_NAME=${DATA_DB_NAME}
+      - DB_USER=${DATA_DB_USER}
+      - DB_PASSWORD=${DATA_DB_PASSWORD}
+      - DB_HOST=postgres-data
+      - DB_PORT=${DATA_DB_PORT}
+      - DATA_SERVICE=${DATA_SERVICE}
+      - RESULTS_SERVICE=${RESULTS_SERVICE}
+    networks:
+      - ualspeed-net
+
+  postgres-data:
+    image: postgres:15
+    container_name: postgres-data
+    volumes:
+      - ./data_service/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - data_data:/var/lib/postgresql/data
+    restart: always
+    environment:
+      POSTGRES_USER: ${DATA_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${DATA_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DATA_POSTGRES_DB}
+    ports:
+      - "5434:5432"
+    networks:
+      - ualspeed-net
+
+networks:
+  ualspeed-net:
+    driver: bridge
+
+volumes:
+  results_data:
+  data_data:
