@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS public.race_results (
     team VARCHAR(255) NOT NULL,
     position INTEGER NOT NULL,
     points INTEGER DEFAULT 0,
-    fastest_lap VARCHAR(20),
-    total_time VARCHAR(20),
+    fastest_lap VARCHAR(50),
+    total_time VARCHAR(50),
     status VARCHAR(20) DEFAULT 'finished' CHECK (status IN ('finished', 'dnf', 'dns', 'dsq')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -46,10 +46,10 @@ CREATE TABLE IF NOT EXISTS public.laps (
     driver_id INTEGER NOT NULL,
     driver_name VARCHAR(255) NOT NULL,
     lap_number INTEGER NOT NULL,
-    lap_time VARCHAR(20) NOT NULL,
-    sector1 VARCHAR(20),
-    sector2 VARCHAR(20),
-    sector3 VARCHAR(20),
+    lap_time VARCHAR(50) NOT NULL,
+    sector1 VARCHAR(50),
+    sector2 VARCHAR(50),
+    sector3 VARCHAR(50),
     position INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(race_id, driver_id, lap_number)

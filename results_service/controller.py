@@ -292,6 +292,96 @@ def get_race(race_id):
         return jsonify({"error": str(e)}), 500
 
 
+
+@results_blueprint.route('/classification/<int:race_id>', methods=['GET'])
+def get_classification(race_id):
+    """Obter classificação atual de uma corrida (resultados ordenados por posição)"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Busca velocidade máxima por piloto no data_service
+        top_speeds = {}
+        try:
+            data_service_url = os.getenv('DATA_SERVICE', 'http://data-service:5003')
+            import requests as req
+            cars_resp = req.get(f"{data_service_url}/data/cars/{race_id}/latest", timeout=2)
+            if cars_resp.status_code == 200:
+                for car in cars_resp.json().get('cars', []):
+                    top_speeds[car['driver_id']] = car.get('speed', 0)
+        except Exception:
+            pass
+
+        # Busca resultados finais da corrida
+        cur.execute("""
+            SELECT driver_id, driver_name, team, position, points, fastest_lap, total_time, status
+            FROM race_results
+            WHERE race_id = %s
+            ORDER BY position ASC
+        """, (race_id,))
+        rows = cur.fetchall()
+
+        if rows:
+            classification = []
+            for row in rows:
+                driver_id = row[0]
+                classification.append({
+                    "driver_id":   driver_id,
+                    "driver_name": row[1],
+                    "team_name":   row[2],
+                    "position":    row[3],
+                    "points":      row[4],
+                    "fastest_lap": row[5],
+                    "total_time":  row[6],
+                    "status":      row[7],
+                    "top_speed":   top_speeds.get(driver_id, 0)
+                })
+            cur.close()
+            conn.close()
+            return jsonify({
+                "race_id": race_id,
+                "source": "results",
+                "classification": classification
+            }), 200
+
+        # Se não houver resultados finais, usa as voltas
+        cur.execute("""
+            SELECT DISTINCT ON (driver_id)
+                driver_id,
+                driver_name,
+                MAX(lap_number) OVER (PARTITION BY driver_id) AS current_lap,
+                MIN(lap_time)   OVER (PARTITION BY driver_id) AS best_lap
+            FROM laps
+            WHERE race_id = %s
+            ORDER BY driver_id, lap_number DESC
+        """, (race_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        classification = []
+        for i, row in enumerate(sorted(rows, key=lambda x: -(x[2] or 0))):
+            driver_id = row[0]
+            classification.append({
+                "driver_id":   driver_id,
+                "driver_name": row[1],
+                "team_name":   "—",
+                "current_lap": row[2],
+                "best_lap":    row[3],
+                "position":    i + 1,
+                "top_speed":   top_speeds.get(driver_id, 0)
+            })
+
+        return jsonify({
+            "race_id": race_id,
+            "source": "laps",
+            "classification": classification
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @results_blueprint.route('/races', methods=['POST'])
 def create_race():
     """Criar nova corrida"""
@@ -315,6 +405,31 @@ def create_race():
         
         return jsonify({"message": "Race created successfully", "race_id": race_id}), 201
     
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+@results_blueprint.route('/races/<int:race_id>/status', methods=['PUT'])
+def update_race_status(race_id):
+    """Atualizar o status de uma corrida (scheduled, live, completed)"""
+    try:
+        data = request.get_json()
+        status = data.get('status')
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            "UPDATE races SET status = %s WHERE race_id = %s",
+            (status, race_id)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": f"Race {race_id} status updated to {status}"}), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -675,7 +790,10 @@ def import_fastf1():
 
         # Carrega a sessão de corrida (Race) do FastF1
         session = fastf1.get_session(year, round_number, 'R')
-        session.load(laps=True, results=True, telemetry=False)
+        try:
+            session.load(laps=True, results=True, telemetry=False)
+        except TypeError:
+            session.load()
 
         conn = get_db_connection()
         cur  = conn.cursor()

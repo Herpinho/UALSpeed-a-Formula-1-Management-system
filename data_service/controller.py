@@ -95,6 +95,31 @@ def get_cars(race_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@data_blueprint.route('/cars/<race_id>/latest', methods=['GET'])
+def get_cars_latest(race_id):
+    """Obtém o último estado de cada carro em pista"""
+    try:
+        db = get_db_connection()
+        cursor = db.cursor()
+
+        cursor.execute("""
+            SELECT DISTINCT ON (driver_id)
+                car_id, race_id, driver_id, speed, rpm, throttle, brake, drs, gear, lap, data_time, created_at
+            FROM cars
+            WHERE race_id = %s
+            ORDER BY driver_id, data_time DESC
+        """, (race_id,))
+        rows = cursor.fetchall()
+        cursor.close()
+        db.close()
+
+        cars = [Car(*row).to_json() for row in rows]
+        return jsonify({'cars': cars, 'count': len(cars)}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @data_blueprint.route('/simulate/<race_id>', methods=['POST'])
 def simulate_race(race_id):
     try:
@@ -105,7 +130,8 @@ def simulate_race(race_id):
         race_name = race['name']
         race_year = race['date'][:4] # Obtém apenas o ano da data
         
-        api_session = requests.get(f"{OPENF1}/sessions?country_name={race_country}&session_name={race_name}&year={race_year}").json()   
+        # Na OpenF1 o nome da sessão de corrida é sempre 'Race'
+        api_session = requests.get(f"{OPENF1}/sessions?country_name={race_country}&session_name=Race&year={race_year}").json()
         if api_session:
             session_key = api_session[0]['session_key']
         else:

@@ -1,4 +1,5 @@
 from flask import Flask
+from flask_cors import CORS
 from controller import results_blueprint
 import os
 
@@ -6,6 +7,8 @@ app = Flask(__name__)
 
 #pedir ao flask para nao alterar a ordem dos dados
 app.config['JSON_SORT_KEYS'] = False
+
+CORS(app)
 
 app.register_blueprint(results_blueprint, url_prefix="/results")
 
