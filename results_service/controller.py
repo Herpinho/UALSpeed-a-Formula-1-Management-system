@@ -656,6 +656,8 @@ def update_standings():
 
 # Cache local para o FastF1 (evita re-downloads)
 CACHE_DIR = os.getenv("FASTF1_CACHE", "/tmp/fastf1_cache")
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(CACHE_DIR)
 
 
