@@ -6,9 +6,9 @@ from model import Race, RaceResult, Lap, Standing
 results_blueprint = Blueprint('results', __name__)
 
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', '5432'),
-    'database': os.getenv('DB_NAME', 'ualspeed'),
+    'host': os.getenv('RDB_HOST', 'localhost'),
+    'port': os.getenv('RDB_PORT', '5432'),
+    'database': os.getenv('RDB_NAME', 'ualspeed'),
     'user': os.getenv('DB_USER', 'postgres'),
     'password': os.getenv('DB_PASSWORD', 'postgres')
 }
@@ -21,12 +21,18 @@ def get_db_connection():
 
 @results_blueprint.route('/', methods=['GET'])
 def health_check():
-    """Health check do serviço"""
+    try:
+        db = get_db_connection()
+        db.close()
+        status = 'running'
+    except:
+        status = 'ERROR'
     return jsonify({
         "service": "UALSpeed Results Service",
         "status": "running",
-        "version": "1.0.0"
-    }), 200
+        "version": "1.0.0",
+        "database": status
+    }),200
 
 
 @results_blueprint.route('/races', methods=['GET'])
@@ -118,7 +124,26 @@ def create_race():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
+@results_blueprint.route('/races/<int:race_id>/status', methods=['PUT'])
+def update_race_status(race_id):
+    try:
+        data = request.get_json()
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute(
+            "UPDATE races SET status = %s WHERE race_id = %s",
+            (data['status'], race_id)
+        )
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return jsonify({'message': 'Status updated'}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 @results_blueprint.route('/races/<int:race_id>', methods=['PUT'])
 def update_race(race_id):
     """Atualizar corrida"""
