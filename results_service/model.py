@@ -78,6 +78,42 @@ class Lap:
         }
 
 
+class Driver:
+    def __init__(self, driver_id, name, nationality, number, team_id, team_name=None):
+        self.driver_id = driver_id
+        self.name = name
+        self.nationality = nationality
+        self.number = number
+        self.team_id = team_id
+        self.team_name = team_name  # join com a tabela teams
+
+    def to_json(self):
+        return {
+            "driver_id": self.driver_id,
+            "name": self.name,
+            "nationality": self.nationality,
+            "number": self.number,
+            "team_id": self.team_id,
+            "team_name": self.team_name
+        }
+
+
+class Team:
+    def __init__(self, team_id, name, nationality, car_model):
+        self.team_id = team_id
+        self.name = name
+        self.nationality = nationality
+        self.car_model = car_model
+
+    def to_json(self):
+        return {
+            "team_id": self.team_id,
+            "name": self.name,
+            "nationality": self.nationality,
+            "car_model": self.car_model
+        }
+
+
 class Standing:
     def __init__(self, standing_id, driver_id, driver_name, team, position, 
                  points, wins, podiums, fastest_laps):

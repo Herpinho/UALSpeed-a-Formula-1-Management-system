@@ -1,14 +1,15 @@
 from flask import Blueprint, request, jsonify
 import psycopg2
 import os
-from model import Race, RaceResult, Lap, Standing
+import fastf1
+from model import Race, RaceResult, Lap, Standing, Driver, Team
 
 results_blueprint = Blueprint('results', __name__)
 
 DB_CONFIG = {
-    'host': os.getenv('RDB_HOST', 'localhost'),
-    'port': os.getenv('RDB_PORT', '5432'),
-    'database': os.getenv('RDB_NAME', 'ualspeed'),
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'port': os.getenv('DB_PORT', '5432'),
+    'database': os.getenv('DB_NAME', 'ualspeed'),
     'user': os.getenv('DB_USER', 'postgres'),
     'password': os.getenv('DB_PASSWORD', 'postgres')
 }
@@ -21,18 +22,211 @@ def get_db_connection():
 
 @results_blueprint.route('/', methods=['GET'])
 def health_check():
-    try:
-        db = get_db_connection()
-        db.close()
-        status = 'running'
-    except:
-        status = 'ERROR'
+    """Health check do serviço"""
     return jsonify({
         "service": "UALSpeed Results Service",
         "status": "running",
-        "version": "1.0.0",
-        "database": status
-    }),200
+        "version": "1.0.0"
+    }), 200
+
+
+# ─── Equipas ──────────────────────────────────────────────────────────────────
+
+@results_blueprint.route('/teams', methods=['GET'])
+def get_teams():
+    """Obter todas as equipas"""
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("SELECT team_id, name, nationality, car_model FROM teams ORDER BY name")
+        rows = cur.fetchall()
+
+        teams = [Team(*row).to_json() for row in rows]
+
+        cur.close()
+        conn.close()
+        return jsonify(teams), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@results_blueprint.route('/teams/<int:team_id>', methods=['GET'])
+def get_team(team_id):
+    """Obter detalhes de uma equipa"""
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("SELECT team_id, name, nationality, car_model FROM teams WHERE team_id = %s", (team_id,))
+        row = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        if row:
+            return jsonify(Team(*row).to_json()), 200
+        return jsonify({"error": "Team not found"}), 404
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@results_blueprint.route('/teams', methods=['POST'])
+def create_team():
+    """Criar nova equipa"""
+    try:
+        data = request.get_json()
+
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute(
+            """INSERT INTO teams (name, nationality, car_model)
+               VALUES (%s, %s, %s) RETURNING team_id""",
+            (data['name'], data.get('nationality'), data.get('car_model'))
+        )
+
+        team_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": "Team created successfully", "team_id": team_id}), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@results_blueprint.route('/teams/<int:team_id>', methods=['PUT'])
+def update_team(team_id):
+    """Atualizar equipa"""
+    try:
+        data = request.get_json()
+
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute(
+            """UPDATE teams SET name=%s, nationality=%s, car_model=%s
+               WHERE team_id=%s""",
+            (data['name'], data.get('nationality'), data.get('car_model'), team_id)
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": "Team updated successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ─── Pilotos ──────────────────────────────────────────────────────────────────
+
+@results_blueprint.route('/drivers', methods=['GET'])
+def get_drivers():
+    """Obter todos os pilotos"""
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("""
+            SELECT d.driver_id, d.name, d.nationality, d.number, d.team_id, t.name
+            FROM drivers d
+            LEFT JOIN teams t ON t.team_id = d.team_id
+            ORDER BY d.number
+        """)
+        rows = cur.fetchall()
+
+        drivers = [Driver(*row).to_json() for row in rows]
+
+        cur.close()
+        conn.close()
+        return jsonify(drivers), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@results_blueprint.route('/drivers/<int:driver_id>', methods=['GET'])
+def get_driver(driver_id):
+    """Obter detalhes de um piloto"""
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("""
+            SELECT d.driver_id, d.name, d.nationality, d.number, d.team_id, t.name
+            FROM drivers d
+            LEFT JOIN teams t ON t.team_id = d.team_id
+            WHERE d.driver_id = %s
+        """, (driver_id,))
+        row = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        if row:
+            return jsonify(Driver(*row).to_json()), 200
+        return jsonify({"error": "Driver not found"}), 404
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@results_blueprint.route('/drivers', methods=['POST'])
+def create_driver():
+    """Criar novo piloto"""
+    try:
+        data = request.get_json()
+
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute(
+            """INSERT INTO drivers (name, nationality, number, team_id)
+               VALUES (%s, %s, %s, %s) RETURNING driver_id""",
+            (data['name'], data.get('nationality'), data['number'], data.get('team_id'))
+        )
+
+        driver_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": "Driver created successfully", "driver_id": driver_id}), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@results_blueprint.route('/drivers/<int:driver_id>', methods=['PUT'])
+def update_driver(driver_id):
+    """Atualizar piloto"""
+    try:
+        data = request.get_json()
+
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute(
+            """UPDATE drivers SET name=%s, nationality=%s, number=%s, team_id=%s
+               WHERE driver_id=%s""",
+            (data['name'], data.get('nationality'), data['number'],
+             data.get('team_id'), driver_id)
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": "Driver updated successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @results_blueprint.route('/races', methods=['GET'])
@@ -124,26 +318,7 @@ def create_race():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@results_blueprint.route('/races/<int:race_id>/status', methods=['PUT'])
-def update_race_status(race_id):
-    try:
-        data = request.get_json()
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        cur.execute(
-            "UPDATE races SET status = %s WHERE race_id = %s",
-            (data['status'], race_id)
-        )
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        return jsonify({'message': 'Status updated'}), 200
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+
 @results_blueprint.route('/races/<int:race_id>', methods=['PUT'])
 def update_race(race_id):
     """Atualizar corrida"""
@@ -473,5 +648,179 @@ def update_standings():
         
         return jsonify({"message": "Standing updated successfully", "standing_id": standing_id}), 201
     
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ─── Importação via FastF1 ────────────────────────────────────────────────────
+
+# Cache local para o FastF1 (evita re-downloads)
+CACHE_DIR = os.getenv("FASTF1_CACHE", "/tmp/fastf1_cache")
+fastf1.Cache.enable_cache(CACHE_DIR)
+
+
+@results_blueprint.route('/import/fastf1', methods=['POST'])
+def import_fastf1():
+    """
+    Importa dados históricos reais de uma corrida usando FastF1.
+    Body JSON: { "year": 2024, "round": 1 }
+    Exemplo: year=2024, round=1 → Grande Prémio do Bahrain 2024
+    """
+    try:
+        data  = request.get_json()
+        year  = data.get('year', 2024)
+        round_number = data.get('round', 1)
+
+        # Carrega a sessão de corrida (Race) do FastF1
+        session = fastf1.get_session(year, round_number, 'R')
+        session.load(laps=True, results=True, telemetry=False)
+
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        # ── 1. Inserir a corrida ─────────────────────────────────────────────
+        event      = session.event
+        race_name  = str(event['EventName'])
+        circuit    = str(event['Location'])
+        country    = str(event['Country'])
+        race_date  = str(event['EventDate'].date())
+        total_laps = int(session.laps['LapNumber'].max()) if not session.laps.empty else 50
+
+        cur.execute(
+            """INSERT INTO races (name, circuit, country, date, total_laps, status)
+               VALUES (%s, %s, %s, %s, %s, 'completed')
+               ON CONFLICT DO NOTHING
+               RETURNING race_id""",
+            (race_name, circuit, country, race_date, total_laps)
+        )
+        row = cur.fetchone()
+        if not row:
+            # Já existia — vai buscar o id
+            cur.execute("SELECT race_id FROM races WHERE name=%s AND date=%s", (race_name, race_date))
+            row = cur.fetchone()
+        race_id = row[0]
+
+        # ── 2. Inserir resultados finais ─────────────────────────────────────
+        results_inserted = 0
+        if session.results is not None and not session.results.empty:
+            for _, driver_row in session.results.iterrows():
+                driver_id   = int(driver_row.get('DriverNumber', 0))
+                driver_name = str(driver_row.get('FullName', 'Unknown'))
+                team        = str(driver_row.get('TeamName', 'Unknown'))
+                position    = int(driver_row.get('Position', 0)) if str(driver_row.get('Position', '')).isdigit() else 0
+                points      = int(driver_row.get('Points', 0))
+                status      = 'finished' if driver_row.get('Status') == 'Finished' else 'dnf'
+                fastest_lap = str(driver_row.get('FastestLapTime', '')) or None
+                total_time  = str(driver_row.get('Time', '')) or None
+
+                cur.execute(
+                    """INSERT INTO race_results
+                       (race_id, driver_id, driver_name, team, position, points, fastest_lap, total_time, status)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT DO NOTHING""",
+                    (race_id, driver_id, driver_name, team, position, points,
+                     fastest_lap, total_time, status)
+                )
+                results_inserted += 1
+
+        # ── 3. Inserir voltas ────────────────────────────────────────────────
+        laps_inserted = 0
+        if not session.laps.empty:
+            for _, lap_row in session.laps.iterrows():
+                driver_id   = int(lap_row.get('DriverNumber', 0))
+                driver_name = str(lap_row.get('Driver', 'Unknown'))
+                lap_number  = int(lap_row.get('LapNumber', 0))
+                lap_time    = str(lap_row.get('LapTime', '')) or None
+                sector1     = str(lap_row.get('Sector1Time', '')) or None
+                sector2     = str(lap_row.get('Sector2Time', '')) or None
+                sector3     = str(lap_row.get('Sector3Time', '')) or None
+                position    = int(lap_row.get('Position', 0)) if lap_row.get('Position') else None
+
+                if not lap_time:
+                    continue
+
+                cur.execute(
+                    """INSERT INTO laps
+                       (race_id, driver_id, driver_name, lap_number, lap_time, sector1, sector2, sector3, position)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (race_id, driver_id, lap_number) DO NOTHING""",
+                    (race_id, driver_id, driver_name, lap_number,
+                     lap_time, sector1, sector2, sector3, position)
+                )
+                laps_inserted += 1
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "message": "FastF1 import complete",
+            "race_id": race_id,
+            "race_name": race_name,
+            "results_inserted": results_inserted,
+            "laps_inserted": laps_inserted
+        }), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@results_blueprint.route('/import/fastf1/standings', methods=['POST'])
+def import_fastf1_standings():
+    """
+    Importa os standings reais de um ano usando FastF1.
+    Body JSON: { "year": 2024 }
+    """
+    try:
+        data = request.get_json()
+        year = data.get('year', 2024)
+
+        # FastF1 não tem standings diretos — calculamos a partir de todas as corridas do ano
+        schedule = fastf1.get_event_schedule(year, include_testing=False)
+
+        driver_points = {}  # driver_id -> { nome, team, pontos, wins, podiums }
+
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        # Busca pontos já guardados na tabela race_results
+        cur.execute("""
+            SELECT driver_id, driver_name, team,
+                   SUM(points) AS total_points,
+                   COUNT(*) FILTER (WHERE position = 1) AS wins,
+                   COUNT(*) FILTER (WHERE position <= 3) AS podiums
+            FROM race_results
+            GROUP BY driver_id, driver_name, team
+            ORDER BY total_points DESC
+        """)
+        rows = cur.fetchall()
+
+        position = 1
+        for row in rows:
+            driver_id, driver_name, team, points, wins, podiums = row
+            cur.execute(
+                """INSERT INTO standings
+                   (driver_id, driver_name, team, position, points, wins, podiums, fastest_laps)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, 0)
+                   ON CONFLICT (driver_id) DO UPDATE SET
+                       position     = EXCLUDED.position,
+                       points       = EXCLUDED.points,
+                       wins         = EXCLUDED.wins,
+                       podiums      = EXCLUDED.podiums,
+                       updated_at   = CURRENT_TIMESTAMP""",
+                (driver_id, driver_name, team, position, int(points or 0),
+                 int(wins or 0), int(podiums or 0))
+            )
+            position += 1
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "message": "Standings updated successfully",
+            "drivers_updated": len(rows)
+        }), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500

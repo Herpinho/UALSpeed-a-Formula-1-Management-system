@@ -1,3 +1,20 @@
+CREATE TABLE IF NOT EXISTS public.teams (
+    team_id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    nationality VARCHAR(100),
+    car_model VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS public.drivers (
+    driver_id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    nationality VARCHAR(100),
+    number INTEGER UNIQUE NOT NULL,
+    team_id INTEGER REFERENCES public.teams(team_id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS public.races (
     race_id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
