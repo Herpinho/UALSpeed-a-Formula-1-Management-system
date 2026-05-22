@@ -2,7 +2,6 @@ FROM nginx:alpine
 
 COPY index.html /usr/share/nginx/html/index.html
 
-# Configuração do nginx 
 RUN echo 'server { \
   listen 3000; \
   root /usr/share/nginx/html; \

@@ -73,3 +73,22 @@ CREATE INDEX IF NOT EXISTS idx_race_results_driver_id ON public.race_results(dri
 CREATE INDEX IF NOT EXISTS idx_laps_race_id ON public.laps(race_id);
 CREATE INDEX IF NOT EXISTS idx_laps_driver_id ON public.laps(driver_id);
 CREATE INDEX IF NOT EXISTS idx_standings_position ON public.standings(position);
+
+
+CREATE TABLE IF NOT EXISTS public.weather (
+    weather_id      SERIAL PRIMARY KEY,
+    race_id         INTEGER REFERENCES public.races(race_id) ON DELETE CASCADE,
+    air_temp_avg    FLOAT,
+    air_temp_min    FLOAT,
+    air_temp_max    FLOAT,
+    track_temp_avg  FLOAT,
+    track_temp_min  FLOAT,
+    track_temp_max  FLOAT,
+    humidity_avg    FLOAT,
+    pressure_avg    FLOAT,
+    wind_speed_avg  FLOAT,
+    wind_dir_avg    FLOAT,
+    rainfall        BOOLEAN DEFAULT FALSE,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(race_id)
+);

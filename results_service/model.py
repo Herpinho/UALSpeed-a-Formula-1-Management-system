@@ -6,7 +6,7 @@ class Race:
         self.country = country
         self.date = date
         self.total_laps = total_laps
-        self.status = status  # scheduled, live, completed
+        self.status = status  
 
     def to_json(self):
         return {
@@ -32,7 +32,7 @@ class RaceResult:
         self.points = points
         self.fastest_lap = fastest_lap
         self.total_time = total_time
-        self.status = status  # finished, dnf, dns, dsq
+        self.status = status  
 
     def to_json(self):
         return {
@@ -85,7 +85,7 @@ class Driver:
         self.nationality = nationality
         self.number = number
         self.team_id = team_id
-        self.team_name = team_name  # join com a tabela teams
+        self.team_name = team_name  
 
     def to_json(self):
         return {

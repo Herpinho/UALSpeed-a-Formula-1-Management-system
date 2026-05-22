@@ -69,6 +69,25 @@ services:
     networks:
       - ualspeed-net
 
+  metrics-service:
+    container_name: metrics-service
+    build:
+      context: ./metrics_service
+      dockerfile: Dockerfile
+    ports:
+      - "5004:5004"
+    depends_on:
+      - postgres-metrics
+    environment:
+      - MDB_NAME=${METRICS_POSTGRES_DB}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - MDB_HOST=postgres-metrics
+      - MDB_PORT=${DB_PORT}
+    networks:
+      - ualspeed-net
+    restart: unless-stopped
+
   postgres-data:
     image: postgres:15
     container_name: postgres-data
@@ -85,6 +104,22 @@ services:
     networks:
       - ualspeed-net
 
+  postgres-metrics:
+    image: postgres:15
+    container_name: postgres-metrics
+    volumes:
+      - ./metrics_service/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - metrics_data:/var/lib/postgresql/data
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${METRICS_POSTGRES_DB}
+    ports:
+      - "5435:5432"
+    networks:
+      - ualspeed-net
+
 networks:
   ualspeed-net:
     driver: bridge
@@ -92,3 +127,4 @@ networks:
 volumes:
   results_data:
   data_data:
+  metrics_data:

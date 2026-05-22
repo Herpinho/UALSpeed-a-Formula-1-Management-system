@@ -1,7 +1,8 @@
-from flask import Blueprint, request, jsonify
+fromfrom flask import Blueprint, request, jsonify
 import psycopg2
 import os
 import fastf1
+import requests
 from model import Race, RaceResult, Lap, Standing, Driver, Team
 
 results_blueprint = Blueprint('results', __name__)
@@ -236,7 +237,7 @@ def get_races():
         conn = get_db_connection()
         cur = conn.cursor()
         
-        status = request.args.get('status')  # Filtrar por status
+        status = request.args.get('status')  
         
         if status:
             cur.execute(
@@ -300,7 +301,6 @@ def get_classification(race_id):
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Busca velocidade máxima por piloto no data_service
         top_speeds = {}
         try:
             data_service_url = os.getenv('DATA_SERVICE', 'http://data-service:5003')
@@ -308,11 +308,10 @@ def get_classification(race_id):
             cars_resp = req.get(f"{data_service_url}/data/cars/{race_id}/latest", timeout=2)
             if cars_resp.status_code == 200:
                 for car in cars_resp.json().get('cars', []):
-                    top_speeds[car['driver_id']] = car.get('speed', 0)
+                    top_speeds[car['driver_id']] = car.get('top_speed') or car.get('speed', 0)
         except Exception:
             pass
 
-        # Busca resultados finais da corrida
         cur.execute("""
             SELECT driver_id, driver_name, team, position, points, fastest_lap, total_time, status
             FROM race_results
@@ -322,19 +321,104 @@ def get_classification(race_id):
         rows = cur.fetchall()
 
         if rows:
+            def fmt_time(t):
+                if not t:
+                    return None
+                s = str(t)
+                s = s.replace('0 days ', '')
+                if '.' in s:
+                    s = s[:s.index('.') + 4]  
+                return s
+
+            # Tempo do 1º classificado para calcular diferenças
+            leader_time_str = str(rows[0][6]) if rows[0][6] else None
+
             classification = []
-            for row in rows:
-                driver_id = row[0]
+            prev_secs = 0
+            last_lap_ref = 0
+            laps_down = 0
+            for i, row in enumerate(rows):
+                driver_id  = row[0]
+                total_time = fmt_time(row[6])
+                fastest    = fmt_time(row[5])
+
+                def to_seconds(t):
+                    try:
+                        t = str(t).replace('0 days ', '')
+                        parts = t.split(':')
+                        h, m, s = int(parts[0]), int(parts[1]), float(parts[2])
+                        return h * 3600 + m * 60 + s
+                    except:
+                        return None
+
+                def seconds_to_str(secs):
+                    if secs is None:
+                        return None
+                    h = int(secs // 3600)
+                    m = int((secs % 3600) // 60)
+                    s = secs % 60
+                    return f"{h:02d}:{m:02d}:{s:06.3f}"
+
+                # Calcula tempo total real para todos os pilotos
+                leader_secs = to_seconds(rows[0][6]) if rows[0][6] else None
+                current_secs = to_seconds(row[6]) if row[6] else None
+
+                if i == 0:
+                    gap = 'Líder'
+                    real_total = total_time
+                    prev_secs = 0        
+                    last_lap_ref = 0     
+                    laps_down = 0
+                elif leader_secs is not None and current_secs is not None:
+                    if current_secs < 600:
+                        if laps_down == 0:
+                            if current_secs >= prev_secs:
+                                gap = f'+{current_secs:.3f}s'
+                                real_total = seconds_to_str(leader_secs + current_secs)
+                                prev_secs = current_secs
+                            else:
+                                # Primeira volta em atraso
+                                laps_down = 1
+                                last_lap_ref = current_secs
+                                gap = '+1 Lap'
+                                real_total = '—'
+                        else:
+                            # Já há voltas em atraso — deteta novo salto
+                            if current_secs < last_lap_ref:
+                                laps_down += 1
+                                last_lap_ref = current_secs
+                                gap = f'+{laps_down} Laps'
+                                real_total = '—'
+                            else:
+                                # Mesmo grupo de voltas em atraso
+                                last_lap_ref = current_secs
+                                gap = f'+{laps_down} Lap' if laps_down == 1 else f'+{laps_down} Laps'
+                                real_total = '—'
+                    elif current_secs < leader_secs:
+                        laps_down += 1
+                        gap = f'+{laps_down} Lap' if laps_down == 1 else f'+{laps_down} Laps'
+                        real_total = '—'
+                    else:
+                        diff = current_secs - leader_secs
+                        gap = f'+{diff:.3f}s' if diff > 0 else 'Líder'
+                        real_total = total_time
+                        prev_secs = diff
+                else:
+                    gap = '—'
+                    real_total = total_time
+
                 classification.append({
-                    "driver_id":   driver_id,
-                    "driver_name": row[1],
-                    "team_name":   row[2],
-                    "position":    row[3],
-                    "points":      row[4],
-                    "fastest_lap": row[5],
-                    "total_time":  row[6],
-                    "status":      row[7],
-                    "top_speed":   top_speeds.get(driver_id, 0)
+                    "driver_id":     driver_id,
+                    "driver_name":   row[1],
+                    "team_name":     row[2],
+                    "position":      row[3],
+                    "points":        row[4],
+                    "fastest_lap":   fastest,
+                    "total_time":    real_total,
+                    "status":        row[7],
+                    "top_speed":     top_speeds.get(driver_id, 0),
+                    "gap_to_leader": gap,
+                    "driver_number": driver_id
                 })
             cur.close()
             conn.close()
@@ -480,7 +564,6 @@ def get_current_race():
             conn.close()
             return jsonify(race.to_json()), 200
         else:
-            # Se não houver corrida live, retornar a próxima agendada
             cur.execute(
                 "SELECT race_id, name, circuit, country, date, total_laps, status FROM races WHERE status = 'scheduled' ORDER BY date LIMIT 1"
             )
@@ -568,7 +651,7 @@ def get_race_laps(race_id):
         conn = get_db_connection()
         cur = conn.cursor()
         
-        driver_id = request.args.get('driver_id')  # Filtrar por piloto
+        driver_id = request.args.get('driver_id')  
         
         if driver_id:
             cur.execute(
@@ -767,13 +850,35 @@ def update_standings():
         return jsonify({"error": str(e)}), 500
 
 
-# ─── Importação via FastF1 ────────────────────────────────────────────────────
 
-# Cache local para o FastF1 (evita re-downloads)
+
+# Cache local para o FastF1 
 CACHE_DIR = os.getenv("FASTF1_CACHE", "/tmp/fastf1_cache")
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(CACHE_DIR)
+
+
+
+@results_blueprint.route('/weather/<int:race_id>', methods=['GET'])
+def get_weather(race_id):
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+        cur.execute("SELECT air_temp_avg, air_temp_min, air_temp_max, track_temp_avg, track_temp_min, track_temp_max, humidity_avg, pressure_avg, wind_speed_avg, wind_dir_avg, rainfall FROM weather WHERE race_id = %s", (race_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            return jsonify({"error": "Sem dados meteorologicos"}), 404
+        return jsonify({
+            "race_id": race_id, "air_temp_avg": row[0], "air_temp_min": row[1], "air_temp_max": row[2],
+            "track_temp_avg": row[3], "track_temp_min": row[4], "track_temp_max": row[5],
+            "humidity_avg": row[6], "pressure_avg": row[7], "wind_speed_avg": row[8],
+            "wind_dir_avg": row[9], "rainfall": row[10]
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @results_blueprint.route('/import/fastf1', methods=['POST'])
@@ -788,12 +893,21 @@ def import_fastf1():
         year  = data.get('year', 2024)
         round_number = data.get('round', 1)
 
-        # Carrega a sessão de corrida (Race) do FastF1
         session = fastf1.get_session(year, round_number, 'R')
-        try:
-            session.load(laps=True, results=True, telemetry=False)
-        except TypeError:
-            session.load()
+        loaded = False
+        for load_args in [
+            {'laps': True, 'results': True, 'telemetry': False},
+            {'laps': True, 'results': True},
+            {},
+        ]:
+            try:
+                session.load(**load_args)
+                loaded = True
+                break
+            except Exception:
+                continue
+        if not loaded:
+            return jsonify({'error': 'Não foi possível carregar a sessão do FastF1'}), 500
 
         conn = get_db_connection()
         cur  = conn.cursor()
@@ -820,18 +934,35 @@ def import_fastf1():
             row = cur.fetchone()
         race_id = row[0]
 
+        import math
+        def safe_int(val, default=0):
+            try:
+                f = float(val)
+                return default if math.isnan(f) else int(f)
+            except (TypeError, ValueError):
+                return default 
+
+        def safe_str(val):
+            if val is None:
+                return None
+            s = str(val)
+            return None if s in ('', 'nan', 'NaT', 'None') else s
+
         # ── 2. Inserir resultados finais ─────────────────────────────────────
         results_inserted = 0
         if session.results is not None and not session.results.empty:
             for _, driver_row in session.results.iterrows():
-                driver_id   = int(driver_row.get('DriverNumber', 0))
+                driver_id   = safe_int(driver_row.get('DriverNumber'), 0)
                 driver_name = str(driver_row.get('FullName', 'Unknown'))
                 team        = str(driver_row.get('TeamName', 'Unknown'))
-                position    = int(driver_row.get('Position', 0)) if str(driver_row.get('Position', '')).isdigit() else 0
-                points      = int(driver_row.get('Points', 0))
+                position    = safe_int(driver_row.get('Position'), 0)
+                points      = safe_int(driver_row.get('Points'), 0)
                 status      = 'finished' if driver_row.get('Status') == 'Finished' else 'dnf'
-                fastest_lap = str(driver_row.get('FastestLapTime', '')) or None
-                total_time  = str(driver_row.get('Time', '')) or None
+                fastest_lap = safe_str(driver_row.get('FastestLapTime'))
+                total_time  = safe_str(driver_row.get('Time'))
+
+                if driver_id == 0:
+                    continue
 
                 cur.execute(
                     """INSERT INTO race_results
@@ -847,16 +978,16 @@ def import_fastf1():
         laps_inserted = 0
         if not session.laps.empty:
             for _, lap_row in session.laps.iterrows():
-                driver_id   = int(lap_row.get('DriverNumber', 0))
+                driver_id   = safe_int(lap_row.get('DriverNumber'), 0)
                 driver_name = str(lap_row.get('Driver', 'Unknown'))
-                lap_number  = int(lap_row.get('LapNumber', 0))
-                lap_time    = str(lap_row.get('LapTime', '')) or None
-                sector1     = str(lap_row.get('Sector1Time', '')) or None
-                sector2     = str(lap_row.get('Sector2Time', '')) or None
-                sector3     = str(lap_row.get('Sector3Time', '')) or None
-                position    = int(lap_row.get('Position', 0)) if lap_row.get('Position') else None
+                lap_number  = safe_int(lap_row.get('LapNumber'), 0)
+                lap_time    = safe_str(lap_row.get('LapTime'))
+                sector1     = safe_str(lap_row.get('Sector1Time'))
+                sector2     = safe_str(lap_row.get('Sector2Time'))
+                sector3     = safe_str(lap_row.get('Sector3Time'))
+                position    = safe_int(lap_row.get('Position'), None)
 
-                if not lap_time:
+                if not lap_time or driver_id == 0 or lap_number == 0:
                     continue
 
                 cur.execute(
@@ -869,6 +1000,48 @@ def import_fastf1():
                 )
                 laps_inserted += 1
 
+        # 4. Inserir meteorologia
+        weather_inserted = False
+        try:
+            if hasattr(session, 'weather_data') and session.weather_data is not None and not session.weather_data.empty:
+                wd = session.weather_data
+                import math
+                def sf(val):
+                    try:
+                        f = float(val)
+                        return None if math.isnan(f) else f
+                    except:
+                        return None
+                cur.execute(
+                    "INSERT INTO weather (race_id, air_temp_avg, air_temp_min, air_temp_max, track_temp_avg, track_temp_min, track_temp_max, humidity_avg, pressure_avg, wind_speed_avg, wind_dir_avg, rainfall) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (race_id) DO UPDATE SET air_temp_avg=EXCLUDED.air_temp_avg, track_temp_avg=EXCLUDED.track_temp_avg, rainfall=EXCLUDED.rainfall",
+                    (race_id, sf(wd['AirTemp'].mean()), sf(wd['AirTemp'].min()), sf(wd['AirTemp'].max()),
+                     sf(wd['TrackTemp'].mean()), sf(wd['TrackTemp'].min()), sf(wd['TrackTemp'].max()),
+                     sf(wd['Humidity'].mean()), sf(wd['Pressure'].mean()),
+                     sf(wd['WindSpeed'].mean()), sf(wd['WindDirection'].mean()),
+                     bool(wd['Rainfall'].any()))
+                )
+                weather_inserted = True
+        except Exception as we:
+            print(f"Erro meteorologia: {we}")
+
+        data_imported = False
+        perf_inserted = 0
+        stint_inserted = 0
+        try:
+            data_service_url = os.getenv('DATA_SERVICE', 'http://data-service:5003')
+            data_resp = requests.post(
+                f"{data_service_url}/data/import/fastf1",
+                json={"year": year, "round": round_number, "race_id": race_id},
+                timeout=120
+            )
+            if data_resp.ok:
+                data_payload = data_resp.json()
+                data_imported = True
+                perf_inserted = data_payload.get('perf_inserted', 0)
+                stint_inserted = data_payload.get('stint_inserted', 0)
+        except Exception as data_error:
+            print(f"Erro ao importar dados FastF1 para o data service: {data_error}")
+
         conn.commit()
         cur.close()
         conn.close()
@@ -878,7 +1051,11 @@ def import_fastf1():
             "race_id": race_id,
             "race_name": race_name,
             "results_inserted": results_inserted,
-            "laps_inserted": laps_inserted
+            "laps_inserted": laps_inserted,
+            "weather_inserted": weather_inserted,
+            "data_imported": data_imported,
+            "perf_inserted": perf_inserted,
+            "stint_inserted": stint_inserted
         }), 201
 
     except Exception as e:
@@ -895,15 +1072,13 @@ def import_fastf1_standings():
         data = request.get_json()
         year = data.get('year', 2024)
 
-        # FastF1 não tem standings diretos — calculamos a partir de todas as corridas do ano
         schedule = fastf1.get_event_schedule(year, include_testing=False)
 
-        driver_points = {}  # driver_id -> { nome, team, pontos, wins, podiums }
+        driver_points = {}  
 
         conn = get_db_connection()
         cur  = conn.cursor()
 
-        # Busca pontos já guardados na tabela race_results
         cur.execute("""
             SELECT driver_id, driver_name, team,
                    SUM(points) AS total_points,

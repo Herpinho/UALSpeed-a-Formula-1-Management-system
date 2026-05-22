@@ -273,6 +273,15 @@
             background: rgba(225, 6, 0, .04);
         }
         
+        .race-table tbody tr {
+            cursor: pointer;
+        }
+        
+        .race-table tbody tr.selected td {
+            background: rgba(225, 6, 0, .12);
+            border-left: 3px solid var(--red);
+        }
+        
         .pos {
             font-family: var(--font-display);
             font-size: 1.1rem;
@@ -341,6 +350,79 @@
             border-radius: 2px;
             background: var(--red);
             transition: width .8s ease;
+        }
+        
+        .driver-detail-header {
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
+        }
+        
+        .driver-detail-name {
+            font-family: var(--font-display);
+            font-size: 1.4rem;
+            font-weight: 900;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+        
+        .driver-detail-info {
+            display: flex;
+            gap: 20px;
+            font-size: .85rem;
+            color: var(--muted);
+        }
+        
+        .driver-detail-info span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+        
+        .metric-card {
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 14px 16px;
+            transition: all .2s;
+            min-height: 98px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        
+        .metric-card:hover {
+            border-color: var(--red);
+            background: var(--bg3);
+        }
+        
+        .metric-label {
+            font-size: .65rem;
+            letter-spacing: 2px;
+            color: var(--muted);
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+        
+        .metric-value {
+            font-family: var(--font-display);
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: var(--red);
+        }
+        
+        .metric-unit {
+            font-size: .75rem;
+            color: var(--muted);
+            font-weight: 500;
         }
         
         .service-grid {
@@ -587,32 +669,59 @@
 ════════════════════════════════════════════════════════════════════════════ -->
     <div id="page-live" class="page active">
 
+        <!-- Seletor de corrida -->
         <div class="race-controls">
             <select id="race-select" class="race-select" onchange="selectRace(this.value)">
       <option value="">— Selecionar corrida —</option>
     </select>
-            <button class="btn btn-primary" onclick="startRace()">▶ INICIAR</button>
-            <button class="btn btn-secondary" onclick="stopRace()">■ PARAR</button>
-            <button class="btn btn-secondary" onclick="simulateRace()">⚡ SIMULAR</button>
-            <button class="btn btn-secondary" onclick="loadClassification()">↻ ATUALIZAR</button>
         </div>
 
-        <div class="grid-4" style="margin-bottom:20px" id="live-stats">
+        <!-- Estatísticas: CORRIDA | PISTA | Nº DE PILOTOS | CONDIÇÕES METEOROLÓGICAS -->
+        <div class="grid-4" style="margin-bottom:24px" id="live-stats">
             <div class="stat-box">
                 <div class="stat-label">Corrida</div>
                 <div class="stat-value red" id="stat-race-name">—</div>
             </div>
             <div class="stat-box">
-                <div class="stat-label">Volta</div>
+                <div class="stat-label">Pista</div>
                 <div class="stat-value" id="stat-lap">—</div>
             </div>
             <div class="stat-box">
-                <div class="stat-label">Carros Ativos</div>
+                <div class="stat-label">Nº de Pilotos</div>
                 <div class="stat-value green" id="stat-cars">0</div>
             </div>
-            <div class="stat-box">
-                <div class="stat-label">Estado</div>
-                <div class="stat-value" id="stat-status">—</div>
+            <div class="stat-box" id="weather-box" onclick="toggleWeather()" style="cursor:pointer;position:relative">
+                <div class="stat-label">Condições Meteorológicas <span style="font-size:.6rem;color:var(--muted)">(clique para detalhes)</span></div>
+                <div class="stat-value" id="stat-status" style="font-size:1rem">—</div>
+                <!-- Painel expandido -->
+                <div id="weather-detail" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.8rem">
+                        <div>
+                            <div style="color:var(--muted);font-size:.6rem;letter-spacing:1px">TEMP. AR</div>
+                            <div id="w-air-temp" style="font-family:var(--font-display);font-size:1rem;font-weight:700">—</div>
+                        </div>
+                        <div>
+                            <div style="color:var(--muted);font-size:.6rem;letter-spacing:1px">TEMP. PISTA</div>
+                            <div id="w-track-temp" style="font-family:var(--font-display);font-size:1rem;font-weight:700;color:var(--red)">—</div>
+                        </div>
+                        <div>
+                            <div style="color:var(--muted);font-size:.6rem;letter-spacing:1px">HUMIDADE</div>
+                            <div id="w-humidity" style="font-family:var(--font-display);font-size:1rem;font-weight:700;color:var(--gold)">—</div>
+                        </div>
+                        <div>
+                            <div style="color:var(--muted);font-size:.6rem;letter-spacing:1px">PRESSÃO</div>
+                            <div id="w-pressure" style="font-family:var(--font-display);font-size:1rem;font-weight:700">—</div>
+                        </div>
+                        <div>
+                            <div style="color:var(--muted);font-size:.6rem;letter-spacing:1px">VENTO</div>
+                            <div id="w-wind-speed" style="font-family:var(--font-display);font-size:1rem;font-weight:700;color:var(--up)">—</div>
+                        </div>
+                        <div>
+                            <div style="color:var(--muted);font-size:.6rem;letter-spacing:1px">DIREÇÃO</div>
+                            <div id="w-wind-dir" style="font-family:var(--font-display);font-size:1rem;font-weight:700">—</div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -626,13 +735,11 @@
                             <th>POS</th>
                             <th>PILOTO</th>
                             <th>EQUIPA</th>
-                            <th>VOLTA</th>
-                            <th>VEL. MÁX</th>
                         </tr>
                     </thead>
                     <tbody id="classification-body">
                         <tr>
-                            <td colspan="5" class="empty">Selecione uma corrida e clique em Iniciar</td>
+                            <td colspan="3" class="empty">Selecione uma corrida e clique em Iniciar</td>
                         </tr>
                     </tbody>
                 </table>
@@ -640,7 +747,7 @@
 
             <!-- Telemetria em tempo real -->
             <div class="card">
-                <div class="section-title">Telemetria em Tempo Real</div>
+                <div class="section-title">Telemetria por piloto</div>
                 <div id="telemetry-cards" style="display:flex;flex-direction:column;gap:10px">
                     <div class="empty">A aguardar dados dos carros...</div>
                 </div>
@@ -760,8 +867,33 @@
                 <div class="stat-value" id="m-avg-latency">— ms</div>
             </div>
             <div class="stat-box">
+                <div class="stat-label">Throughput (evt/min)</div>
+                <div class="stat-value" id="m-throughput">—</div>
+            </div>
+            <div class="stat-box">
                 <div class="stat-label">Último Check</div>
                 <div class="stat-value" id="m-last-check" style="font-size:1rem">—</div>
+            </div>
+        </div>
+
+        <div class="section-title">Demonstração Rápida</div>
+        <div class="card" style="margin-bottom:24px">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;align-items:start">
+                <div class="stat-box" style="min-height:110px">
+                    <div class="stat-label">1. Recolha e visualização de dados</div>
+                    <div style="color:var(--muted);margin-bottom:12px;line-height:1.5">Abre a página ao vivo e carrega uma corrida para mostrar classificação e telemetria.</div>
+                    <button class="btn btn-primary btn-sm" onclick="openDemoRace()">Abrir corrida demo</button>
+                </div>
+                <div class="stat-box" style="min-height:110px">
+                    <div class="stat-label">2. Recuperação após falha simulada</div>
+                    <div style="color:var(--muted);margin-bottom:12px;line-height:1.5">Faz o Data Service ficar offline durante alguns segundos e voltar sozinho.</div>
+                    <button class="btn btn-danger btn-sm" onclick="triggerDemoFailure()">Simular falha</button>
+                </div>
+                <div class="stat-box" style="min-height:110px">
+                    <div class="stat-label">3. Escalabilidade por eventos</div>
+                    <div style="color:var(--muted);margin-bottom:12px;line-height:1.5">Gera um pico de eventos para aumentar o throughput e atualizar o gráfico.</div>
+                    <button class="btn btn-primary btn-sm" onclick="generateEventBurst()">Gerar burst</button>
+                </div>
             </div>
         </div>
 
@@ -778,6 +910,13 @@
                 <canvas id="latency-chart" height="80"></canvas>
             </div>
         </div>
+
+            <div style="margin-top:24px">
+                <div class="section-title">Throughput (últimos minutos)</div>
+                <div class="card">
+                    <canvas id="throughput-chart" height="80"></canvas>
+                </div>
+            </div>
     </div>
 
     <!-- ─── Toast ──────────────────────────────────────────────────────────────── -->
@@ -785,15 +924,21 @@
 
     <script>
         const API = {
-            data: 'http://localhost:5003/data',
-            results: 'http://localhost:5002/results',
-            metrics: 'http://localhost:5003/metrics',
+                data: 'http://localhost:5003/data',
+                results: 'http://localhost:5002/results',
+                metrics: 'http://localhost:5004/metrics',
         };
 
         let currentRaceId = null;
+        let selectedDriver = null;
+        let classificationData = null;
         let refreshInterval = null;
         let metricsInterval = null;
         let latencyHistory = {
+            labels: [],
+            data: []
+        };
+        let throughputHistory = {
             labels: [],
             data: []
         };
@@ -848,36 +993,41 @@
             });
         }
 
-        function selectRace(id) {
+        async function selectRace(id) {
             currentRaceId = id || null;
             if (!id) return;
-            const sel = document.getElementById('race-select');
-            const name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '—';
-            document.getElementById('stat-race-name').textContent = name.split(' (')[0];
+
+            // Vai buscar detalhes da corrida (circuit, country, etc.)
+            const race = await apiFetch(`${API.results}/races/${id}`);
+            if (race) {
+                document.getElementById('stat-race-name').textContent = race.name || '—';
+                document.getElementById('stat-lap').textContent = race.circuit || '—';
+            }
+
+            // Vai buscar meteorologia da corrida
+            const weather = await apiFetch(`${API.results}/weather/${id}`);
+            if (weather && !weather.error) {
+                const rain = weather.rainfall ? '🌧 Chuva' : '☀️ Seco';
+                document.getElementById('stat-status').textContent =
+                    `${rain} · ${weather.air_temp_avg?.toFixed(1) ?? '—'}°C`;
+                document.getElementById('stat-status').style.fontSize = '1rem';
+
+                // Preenche detalhes
+                document.getElementById('w-air-temp').textContent   = weather.air_temp_avg   ? weather.air_temp_avg.toFixed(1)   + ' °C'   : '—';
+                document.getElementById('w-track-temp').textContent = weather.track_temp_avg ? weather.track_temp_avg.toFixed(1) + ' °C'   : '—';
+                document.getElementById('w-humidity').textContent   = weather.humidity_avg   ? weather.humidity_avg.toFixed(1)   + ' %'    : '—';
+                document.getElementById('w-pressure').textContent   = weather.pressure_avg   ? weather.pressure_avg.toFixed(1)   + ' mbar' : '—';
+                document.getElementById('w-wind-speed').textContent = weather.wind_speed_avg ? weather.wind_speed_avg.toFixed(1) + ' km/h' : '—';
+                document.getElementById('w-wind-dir').textContent   = weather.wind_dir_avg   ? weather.wind_dir_avg.toFixed(0)   + '°'     : '—';
+            } else {
+                document.getElementById('stat-status').textContent = '—';
+            }
+
             loadClassification();
             loadLiveTelemetry();
         }
 
-        async function startRace() {
-            if (!currentRaceId) {
-                toast('Selecione uma corrida primeiro', true);
-                return;
-            }
-            const data = await apiFetch(`${API.data}/race/${currentRaceId}/start`, {
-                method: 'PUT',
-                body: JSON.stringify({
-                    race_id: +currentRaceId,
-                    race_name: 'Corrida',
-                    drivers: [1, 2, 3, 4]
-                })
-            });
-            if (data) {
-                toast('Corrida iniciada!');
-                document.getElementById('stat-status').textContent = 'EM CURSO';
-                document.getElementById('stat-status').style.color = 'var(--up)';
-                startAutoRefresh();
-            }
-        }
+
 
         async function stopRace() {
             if (!currentRaceId) return;
@@ -890,20 +1040,7 @@
             stopAutoRefresh();
         }
 
-        async function simulateRace() {
-            if (!currentRaceId) {
-                toast('Selecione uma corrida primeiro', true);
-                return;
-            }
-            toast('A simular telemetria...');
-            await apiFetch(`${API.data}/simulate/${currentRaceId}`, {
-                method: 'POST',
-                body: JSON.stringify({})
-            });
-            toast('Simulação concluída!');
-            await loadClassification();
-            await loadLiveTelemetry();
-        }
+
 
         function startAutoRefresh() {
             stopAutoRefresh();
@@ -925,32 +1062,191 @@
             const data = await apiFetch(`${API.results}/classification/${currentRaceId}`);
             const body = document.getElementById('classification-body');
             if (!data || !data.classification.length) {
-                body.innerHTML = '<tr><td colspan="5" class="empty">Sem dados de classificação</td></tr>';
+                body.innerHTML = '<tr><td colspan="3" class="empty">Sem dados de classificação</td></tr>';
+                classificationData = null;
                 return;
             }
             const cls = data.classification;
+            classificationData = cls;
             document.getElementById('stat-cars').textContent = cls.length;
-            document.getElementById('stat-lap').textContent = Math.max(...cls.map(c => c.current_lap || 0));
 
             body.innerHTML = cls.map((c, i) => {
                 const pos = i + 1;
                 const cls2 = pos === 1 ? 'p1' : pos === 2 ? 'p2' : pos === 3 ? 'p3' : '';
+                const isSelected = selectedDriver && selectedDriver.driver_id === c.driver_id ? 'selected' : '';
                 return `
-      <tr>
+      <tr class="${isSelected}" data-driver-index="${i}" onclick="selectDriver(${i})">
         <td><span class="pos ${cls2}">${pos}</span></td>
         <td>
           <span class="driver-name">${c.driver_name || '—'}</span>
           <span class="driver-num">${c.driver_number || ''}</span>
         </td>
         <td class="team-tag">${c.team_name || '—'}</td>
-        <td><span class="lap-badge">${c.current_lap || 0}</span></td>
-        <td><span class="speed-val" style="color:var(--red)">${(c.top_speed || 0).toFixed(0)} km/h</span></td>
       </tr>`;
             }).join('');
         }
 
+        function selectDriver(index) {
+            if (!classificationData || !classificationData[index]) return;
+            
+            selectedDriver = classificationData[index];
+            const position = index + 1;
+            
+            // Atualizar a seleção visual na tabela
+            document.querySelectorAll('#classification-body tr').forEach(tr => tr.classList.remove('selected'));
+            document.querySelector(`#classification-body tr[data-driver-index="${index}"]`)?.classList.add('selected');
+            
+            // Mostrar detalhes do piloto na área de telemetria
+            showDriverDetails(selectedDriver, position);
+        }
+
+        function formatMetricNumber(value, digits = 1) {
+            if (value === null || value === undefined || value === '') return '—';
+            const numeric = Number(value);
+            if (Number.isNaN(numeric)) return '—';
+            return numeric.toFixed(digits);
+        }
+
+        function sumStintLaps(stint) {
+            if (!stint) return 0;
+            if (Number.isFinite(Number(stint.laps_in_stint))) {
+                return Number(stint.laps_in_stint);
+            }
+            const start = Number(stint.lap_start);
+            const end = Number(stint.lap_end);
+            if (Number.isFinite(start) && Number.isFinite(end)) {
+                return Math.max(0, end - start + 1);
+            }
+            return 0;
+        }
+
+        function buildCompoundSummary(stints) {
+            if (!stints.length) return '—';
+            const totals = new Map();
+            const order = [];
+
+            stints
+                .slice()
+                .sort((a, b) => Number(a.stint_number || 0) - Number(b.stint_number || 0))
+                .forEach(stint => {
+                    const compound = (stint.compound || '—').toUpperCase();
+                    if (!totals.has(compound)) {
+                        totals.set(compound, 0);
+                        order.push(compound);
+                    }
+                    totals.set(compound, totals.get(compound) + sumStintLaps(stint));
+                });
+
+            return order.map(compound => `${compound} ${totals.get(compound)}v`).join(' | ');
+        }
+
+        function buildStrategySummary(stints) {
+            if (!stints.length) return '—';
+            return stints
+                .slice()
+                .sort((a, b) => Number(a.stint_number || 0) - Number(b.stint_number || 0))
+                .map(stint => (stint.compound || '—').toUpperCase())
+                .join(' → ');
+        }
+        
+        function formatDRSTime(seconds) {
+            if (seconds === null || seconds === undefined || seconds === '') return '—';
+            const numeric = Number(seconds);
+            if (Number.isNaN(numeric)) return '—';
+            
+            if (numeric < 60) {
+                return numeric.toFixed(1) + ' seg';
+            }
+            
+            const mins = Math.floor(numeric / 60);
+            const secs = Math.round(numeric % 60);
+            return `${mins}m ${secs}s`;
+        }
+
+        async function showDriverDetails(driver, position) {
+            const wrap = document.getElementById('telemetry-cards');
+            wrap.innerHTML = '<div class="empty">A carregar telemetria...</div>';
+
+            const [performanceData, stintData, telemetryData] = await Promise.all([
+                apiFetch(`${API.data}/performance/${currentRaceId}/${driver.driver_id}`),
+                apiFetch(`${API.data}/stints/${currentRaceId}/${driver.driver_id}`),
+                apiFetch(`${API.data}/cars/${currentRaceId}/latest`)
+            ]);
+
+            const driverTelemetry = telemetryData?.cars?.find(c => c.driver_id === driver.driver_id) || null;
+            const performance = performanceData && !performanceData.error ? performanceData : null;
+            const stints = Array.isArray(stintData) ? stintData : [];
+
+            const compoundStrategy = buildStrategySummary(stints);
+            const lapsPerCompound = buildCompoundSummary(stints);
+            const pitStops = stints.length ? Math.max(0, stints.length - 1) : driverTelemetry?.pit_laps;
+
+            const maxSpeed = performance?.max_speed ?? driverTelemetry?.max_speed;
+            const maxRpm = performance?.max_rpm ?? driverTelemetry?.max_rpm;
+            const avgThrottle = performance?.avg_throttle ?? driverTelemetry?.avg_throttle;
+            const avgBrake = performance?.avg_brake ?? driverTelemetry?.avg_brake;
+            const drsTime = performance?.drs_time ?? driverTelemetry?.drs_time;
+            const bestLap = performance?.best_lap_time || driver.fastest_lap || '—';
+            const totalTime = driver.total_time || '—';
+            const teamName = driver.team_name || '—';
+            const driverNumber = driver.driver_number || driver.driver_id || '—';
+            const points = driver.points ?? '—';
+            const gapToLeader = driver.gap_to_leader || '—';
+
+            const cards = [
+                { label: 'VEL. MÁX (VOLTA)', value: formatMetricNumber(maxSpeed, 0), unit: 'km/h', color: 'var(--red)' },
+                { label: 'RPM MÁXIMO', value: Number.isFinite(Number(maxRpm)) ? Number(maxRpm).toLocaleString() : '—', unit: 'rpm', color: 'var(--gold)' },
+                { label: 'ACELERADOR MÉDIO', value: formatMetricNumber(avgThrottle, 1), unit: '%', color: 'var(--up)' },
+                { label: 'TRAVAGEM MÉDIA', value: formatMetricNumber(avgBrake, 1), unit: '%', color: 'var(--red)' },
+                { label: 'TEMPO DRS', value: formatDRSTime(drsTime), unit: '', color: 'var(--up)' },
+                { label: 'ESTRATÉGIA DE PNEUS', value: compoundStrategy, unit: '', color: 'var(--red)' },
+                { label: 'VOLTAS POR COMPOSTO', value: lapsPerCompound, unit: '', color: 'var(--red)' },
+                { label: 'PIT STOPS', value: pitStops === null || pitStops === undefined ? '—' : pitStops, unit: '', color: 'var(--warn)' },
+                { label: 'MELHOR VOLTA', value: bestLap, unit: '', color: 'var(--gold)' },
+                { label: 'DIFERENÇA PARA O 1º', value: gapToLeader, unit: '', color: position === 1 ? 'var(--up)' : 'var(--text)' }
+            ];
+
+            wrap.innerHTML = `
+                <div class="driver-detail-header">
+                    <div class="driver-detail-name">${driver.driver_name || 'Piloto'}</div>
+                    <div class="driver-detail-info">
+                        <span style="color:var(--text)">Tempo: <strong style="color:var(--gold)">${totalTime}</strong></span>
+                        <span style="color:var(--muted)">|</span>
+                        <span style="color:var(--text)">Equipa: <strong style="color:var(--red)">${teamName}</strong></span>
+                        <span style="color:var(--muted)">|</span>
+                        <span style="color:var(--text)">Nº <strong style="color:var(--text)">${driverNumber}</strong></span>
+                        <span style="color:var(--muted)">|</span>
+                        <span style="color:var(--text)">Pontos: <strong style="color:var(--up)">${points}</strong></span>
+                    </div>
+                </div>
+
+                <div class="metric-grid">
+                    ${cards.map(card => `
+                        <div class="metric-card">
+                            <div class="metric-label">${card.label}</div>
+                            <div class="metric-value" style="color:${card.color};font-size:${card.label === 'ESTRATÉGIA DE PNEUS' || card.label === 'VOLTAS POR COMPOSTO' ? '1rem' : '1.5rem'}">
+                                ${card.value}
+                                ${card.unit ? `<span class="metric-unit">${card.unit}</span>` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
         async function loadLiveTelemetry() {
             if (!currentRaceId) return;
+            
+            // Se há um piloto selecionado, atualizar apenas os seus detalhes
+            if (selectedDriver && classificationData) {
+                const driverIndex = classificationData.findIndex(d => d.driver_id === selectedDriver.driver_id);
+                if (driverIndex !== -1) {
+                    await showDriverDetails(classificationData[driverIndex], driverIndex + 1);
+                    return;
+                }
+            }
+            
+            // Caso contrário, mostrar telemetria de todos os carros
             const data = await apiFetch(`${API.data}/cars/${currentRaceId}/latest`);
             const wrap = document.getElementById('telemetry-cards');
             if (!data || !data.cars.length) {
@@ -963,9 +1259,9 @@
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:12px 16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span style="font-family:var(--font-display);font-weight:700;font-size:.95rem">
-            Piloto #${c.driver_id}
+            ${c.driver_name || 'Piloto'} <span style="color:var(--muted);font-size:.8rem">#${c.driver_id}</span>
           </span>
-          <span style="font-size:.7rem;color:var(--muted)">Volta ${c.lap || 0}</span>
+          <span style="font-size:.7rem;color:var(--muted)">Volta ${c.lap > 0 ? c.lap : '—'}</span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px">
           <div>
@@ -1010,14 +1306,14 @@
             sel.innerHTML = '<option value="">— Selecionar equipa —</option>';
             teams.forEach(t => {
                 const o = document.createElement('option');
-                o.value = t.id;
+                o.value = t.team_id;
                 o.text = t.name;
                 sel.appendChild(o);
             });
 
             body.innerHTML = teams.length ? teams.map(t => `
     <tr>
-      <td style="color:var(--muted)">${t.id}</td>
+      <td style="color:var(--muted)">${t.team_id}</td>
       <td style="font-family:var(--font-display);font-weight:700">${t.name}</td>
       <td>${t.car_model}</td>
       <td style="color:var(--muted)">${t.nationality}</td>
@@ -1115,6 +1411,10 @@
             document.getElementById('m-services-up').textContent = up;
             document.getElementById('m-services-down').textContent = down;
             document.getElementById('m-avg-latency').textContent = avgLat + ' ms';
+            // Fetch throughput
+            const tp = await apiFetch(`${API.metrics}/throughput?minutes=10`);
+            const throughputVal = tp && !tp.error ? tp.avg_per_min : null;
+            document.getElementById('m-throughput').textContent = throughputVal !== null ? throughputVal + ' /min' : '—';
             document.getElementById('m-last-check').textContent = new Date(data.timestamp).toLocaleTimeString('pt-PT');
 
             document.getElementById('services-grid').innerHTML = services.map(s => `
@@ -1133,6 +1433,15 @@
                     latencyHistory.data.shift();
                 }
                 drawLatencyChart();
+            }
+
+            // Update throughput chart
+            if (tp && !tp.error) {
+                const labels = tp.per_minute.map(p => p.minute);
+                const dataPoints = tp.per_minute.map(p => p.count);
+                throughputHistory.labels = labels;
+                throughputHistory.data = dataPoints;
+                drawThroughputChart();
             }
         }
 
@@ -1165,6 +1474,94 @@
             ctx.closePath();
             ctx.fillStyle = 'rgba(225,6,0,.08)';
             ctx.fill();
+        }
+
+        function drawThroughputChart() {
+            const canvas = document.getElementById('throughput-chart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const W = canvas.width = canvas.offsetWidth;
+            const H = canvas.height = 80;
+            ctx.clearRect(0, 0, W, H);
+
+            const data = throughputHistory.data;
+            if (!data || data.length < 1) return;
+            const max = Math.max(...data, 1);
+            const step = W / Math.max(1, data.length - 1);
+
+            ctx.beginPath();
+            ctx.strokeStyle = '#ffd700';
+            ctx.lineWidth = 2;
+            data.forEach((v, i) => {
+                const x = i * step;
+                const y = H - (v / max) * (H - 10) - 5;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            ctx.lineTo(W, H);
+            ctx.lineTo(0, H);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(255,215,0,.06)';
+            ctx.fill();
+        }
+
+        async function openDemoRace() {
+            showPage('live');
+            await loadRaces();
+            const raceSelect = document.getElementById('race-select');
+            if (!raceSelect || raceSelect.options.length < 2) {
+                toast('Sem corridas disponíveis para demo', true);
+                return;
+            }
+            const firstRaceId = raceSelect.options[1].value;
+            raceSelect.value = firstRaceId;
+            await selectRace(firstRaceId);
+            toast('Corrida demo carregada');
+        }
+
+        async function triggerDemoFailure() {
+            const res = await apiFetch(`${API.data}/demo/failure`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    seconds: 20,
+                    reason: 'Simulated outage for class demo'
+                })
+            });
+
+            if (!res) {
+                toast('Não foi possível simular a falha', true);
+                return;
+            }
+
+            toast('Falha simulada no Data Service por 20 segundos', true);
+            await apiFetch(`${API.metrics}/check`, { method: 'POST' });
+            loadMetrics();
+            setTimeout(loadMetrics, 6000);
+            setTimeout(loadMetrics, 22000);
+        }
+
+        async function generateEventBurst() {
+            const res = await apiFetch(`${API.metrics}/events/bulk`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    count: 1000,
+                    event_type: 'demo_burst'
+                })
+            });
+
+            if (!res) {
+                toast('Não foi possível gerar eventos', true);
+                return;
+            }
+
+            toast(`Burst de ${res.count} eventos gerado`);
+            loadMetrics();
+        }
+
+        function toggleWeather() {
+            const detail = document.getElementById('weather-detail');
+            detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
         }
 
         window.addEventListener('load', () => {
