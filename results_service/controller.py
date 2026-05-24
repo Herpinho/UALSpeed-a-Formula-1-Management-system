@@ -1,4 +1,4 @@
-fromfrom flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify
 import psycopg2
 import os
 import fastf1

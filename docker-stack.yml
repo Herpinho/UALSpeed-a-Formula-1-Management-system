@@ -1,0 +1,155 @@
+version: '3.8'
+services:
+  frontend:
+    image: ualspeed-frontend:latest
+    ports:
+      - target: 3000
+        published: 8080
+        protocol: tcp
+        mode: ingress
+    networks:
+    - ualspeed-overlay
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    
+  results-service:
+    image: ualspeed-results:latest
+    ports:
+    - target: 5002
+      published: 5002
+      protocol: tcp
+      mode: ingress
+    networks:
+      - ualspeed-overlay
+    depends_on:
+      - postgres-results
+    environment:
+      - DB_HOST=postgres-results
+      - DB_PORT=5432
+      - DB_NAME=${RESULTS_DB_NAME:-ualspeed_results}
+      - DB_USER=${RESULTS_DB_USER:-postgres}
+      - DB_PASSWORD=${RESULTS_DB_PASSWORD:-postgres}
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+  data-service:
+    image: ualspeed-data:latest
+    ports:
+    - target: 5003
+      published: 5003
+      protocol: tcp
+      mode: ingress
+    networks:
+      - ualspeed-overlay
+    depends_on:
+      - postgres-data
+    environment:
+      - DB_HOST=postgres-data
+      - DB_PORT=5432
+      - DB_NAME=${DATA_DB_NAME:-ualspeed_data}
+      - DB_USER=${DATA_DB_USER:-postgres}
+      - DB_PASSWORD=${DATA_DB_PASSWORD:-postgres}
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+  metrics-service:
+    image: ualspeed-metrics:latest
+    ports:
+    - target: 5004
+      published: 5004
+      protocol: tcp
+      mode: ingress
+    networks:
+      - ualspeed-overlay
+    environment:
+      - MDB_HOST=ualspeed_postgres-metrics
+      - MDB_PORT=5432
+      - MDB_NAME=ualspeed_metrics
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - RESULTS_SERVICE=http://results-service:5002
+      - DATA_SERVICE=http://data-service:5003
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+  postgres-results:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${RESULTS_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${RESULTS_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${RESULTS_DB_NAME:-ualspeed_results}
+    volumes:
+      - results_data:/var/lib/postgresql/data
+    networks:
+      - ualspeed-overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+  postgres-data:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${DATA_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DATA_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DATA_DB_NAME:-ualspeed_data}
+    volumes:
+      - data_data:/var/lib/postgresql/data
+    networks:
+      - ualspeed-overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+  postgres-metrics:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ualspeed_metrics
+    volumes:
+      - metrics_data:/var/lib/postgresql/data
+    networks:
+      - ualspeed-overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+networks:
+  ualspeed-overlay:
+    driver: overlay
+    attachable: true
+volumes:
+  results_data:
+  data_data:
+  metrics_data:
+
