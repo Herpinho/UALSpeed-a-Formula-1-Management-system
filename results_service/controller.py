@@ -881,6 +881,26 @@ def get_weather(race_id):
         return jsonify({"error": str(e)}), 500
 
 
+
+@results_blueprint.route('/calendar/<int:year>', methods=['GET'])
+def get_calendar(year):
+    """Devolve o calendário de corridas de um ano via FastF1"""
+    try:
+        schedule = fastf1.get_event_schedule(year, include_testing=False)
+        races = []
+        for _, event in schedule.iterrows():
+            races.append({
+                "round":   int(event['RoundNumber']),
+                "name":    str(event['EventName']),
+                "circuit": str(event['Location']),
+                "country": str(event['Country']),
+                "date":    str(event['EventDate'].date()),
+            })
+        return jsonify({"year": year, "races": races}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @results_blueprint.route('/import/fastf1', methods=['POST'])
 def import_fastf1():
     """
