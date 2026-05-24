@@ -636,6 +636,44 @@
             letter-spacing: 1px;
         }
         
+
+        /* ─── Modal Importar Corrida ──────────────────────────────────────────────── */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,.7); z-index: 1000;
+            align-items: center; justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: var(--bg1); border: 1px solid var(--border);
+            border-top: 3px solid var(--red); border-radius: 8px;
+            padding: 28px; width: 480px; max-width: 90vw;
+            max-height: 80vh; overflow-y: auto;
+        }
+        .modal-title {
+            font-family: var(--font-display); font-size: 1.3rem;
+            font-weight: 900; letter-spacing: 2px;
+            color: var(--text); margin-bottom: 20px;
+        }
+        .modal-close {
+            float: right; background: none; border: none;
+            color: var(--muted); font-size: 1.2rem; cursor: pointer;
+        }
+        .modal-close:hover { color: var(--red); }
+        .race-list { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; max-height: 340px; overflow-y: auto; }
+        .race-list-item {
+            display: flex; align-items: center; justify-content: space-between;
+            background: var(--bg2); border: 1px solid var(--border);
+            border-radius: 5px; padding: 10px 14px; cursor: pointer; transition: all .2s;
+        }
+        .race-list-item:hover { border-color: var(--red); background: var(--bg3); }
+        .race-list-item.importing { opacity: .5; pointer-events: none; }
+        .race-list-name { font-family: var(--font-display); font-weight: 700; font-size: .95rem; }
+        .race-list-info { font-size: .75rem; color: var(--muted); }
+        .race-list-date { font-size: .75rem; color: var(--muted); text-align: right; }
+        .import-status { margin-top: 16px; padding: 10px 14px; border-radius: 5px; font-size: .85rem; display: none; }
+        .import-status.loading { display: block; background: rgba(225,6,0,.1); color: var(--red); border: 1px solid var(--red-dim); }
+        .import-status.success { display: block; background: rgba(0,230,118,.1); color: var(--up); border: 1px solid var(--up); }
          ::-webkit-scrollbar {
             width: 5px;
         }
@@ -763,6 +801,10 @@
 
             <!-- Equipas -->
             <div>
+                <!-- Botão Adicionar Corrida -->
+                <div style="margin-bottom:24px">
+                    <button class="btn btn-primary" onclick="openImportModal()" style="font-size:1rem;padding:12px 28px">+ ADICIONAR CORRIDA</button>
+                </div>
                 <div class="section-title">Equipas</div>
                 <div class="card" style="margin-bottom:16px">
                     <div style="font-family:var(--font-display);font-size:.85rem;letter-spacing:1px;color:var(--muted);margin-bottom:14px">ADICIONAR EQUIPA</div>
@@ -917,6 +959,33 @@
                     <canvas id="throughput-chart" height="80"></canvas>
                 </div>
             </div>
+    </div>
+
+    <!-- ─── Modal Importar Corrida ───────────────────────────────────────────── -->
+    <div class="modal-overlay" id="import-modal">
+        <div class="modal">
+            <div class="modal-title">
+                + ADICIONAR CORRIDA
+                <button class="modal-close" onclick="closeImportModal()">✕</button>
+            </div>
+            <div class="form-group">
+                <label>Ano</label>
+                <select id="import-year" onchange="loadCalendar(this.value)">
+                    <option value="">— Selecionar ano —</option>
+                    <option value="2025">2025</option>
+                    <option value="2024">2024</option>
+                    <option value="2023">2023</option>
+                    <option value="2022">2022</option>
+                    <option value="2021">2021</option>
+                    <option value="2020">2020</option>
+                    <option value="2019">2019</option>
+                    <option value="2018">2018</option>
+                </select>
+            </div>
+            <div id="calendar-loading" style="display:none;color:var(--muted);font-size:.85rem">A carregar calendário...</div>
+            <div class="race-list" id="race-list"></div>
+            <div class="import-status" id="import-status"></div>
+        </div>
     </div>
 
     <!-- ─── Toast ──────────────────────────────────────────────────────────────── -->
@@ -1564,7 +1633,67 @@
             detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
         }
 
+
+        function openImportModal() {
+            document.getElementById('import-modal').classList.add('active');
+            document.getElementById('import-year').value = '';
+            document.getElementById('race-list').innerHTML = '';
+            document.getElementById('import-status').className = 'import-status';
+        }
+
+        function closeImportModal() {
+            document.getElementById('import-modal').classList.remove('active');
+        }
+
+        async function loadCalendar(year) {
+            if (!year) return;
+            const list    = document.getElementById('race-list');
+            const loading = document.getElementById('calendar-loading');
+            list.innerHTML = '';
+            loading.style.display = 'block';
+            const data = await apiFetch(`${API.results}/calendar/${year}`);
+            loading.style.display = 'none';
+            if (!data || !data.races) {
+                list.innerHTML = '<div class="empty">Erro ao carregar calendário</div>';
+                return;
+            }
+            list.innerHTML = data.races.map(r => `
+                <div class="race-list-item" onclick="importRace(${year}, ${r.round}, this)" data-name="${r.name}">
+                    <div>
+                        <div class="race-list-name">R${r.round} · ${r.name}</div>
+                        <div class="race-list-info">${r.circuit}, ${r.country}</div>
+                    </div>
+                    <div class="race-list-date">${r.date}</div>
+                </div>
+            `).join('');
+        }
+
+        async function importRace(year, round, el) {
+            const name   = el.dataset.name;
+            const status = document.getElementById('import-status');
+            el.classList.add('importing');
+            status.className = 'import-status loading';
+            status.textContent = `A importar ${name}... pode demorar 1-2 minutos.`;
+            const res = await apiFetch(`${API.results}/import/fastf1`, {
+                method: 'POST',
+                body: JSON.stringify({ year: year, round: round })
+            });
+            el.classList.remove('importing');
+            if (res && res.race_id) {
+                status.className = 'import-status success';
+                status.textContent = `✅ ${name} importado! ${res.results_inserted} resultados, ${res.laps_inserted} voltas.`;
+                await loadRaces();
+                toast(`${name} adicionado com sucesso!`);
+            } else {
+                status.className = 'import-status loading';
+                status.textContent = `❌ Erro ao importar ${name}.`;
+            }
+        }
+
         window.addEventListener('load', () => {
+            document.getElementById('import-modal').addEventListener('click', function(e) {
+                if (e.target === this) closeImportModal();
+            });
             loadRaces();
             metricsInterval = setInterval(() => {
                 const metricsPage = document.getElementById('page-metrics');
