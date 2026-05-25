@@ -113,6 +113,31 @@ def seed_demo_race(conn, race_id):
 
 def import_fastf1_race(year, round_number, race_name_override=None, status='completed'):
     """Importa uma corrida FastF1 para a base de dados e devolve os metadados."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Verificar se a corrida já existe
+    cur.execute(
+        "SELECT race_id, name, circuit, country, date, total_laps, status, round, year FROM races WHERE year = %s AND round = %s",
+        (year, round_number)
+    )
+    existing_race = cur.fetchone()
+    
+    if existing_race:
+        cur.close()
+        conn.close()
+        return {
+            "race_id": existing_race[0],
+            "race": Race(existing_race[0], existing_race[1], existing_race[2], existing_race[3], existing_race[4], existing_race[5], existing_race[6], existing_race[7], existing_race[8]).to_json(),
+            "results_inserted": 0,
+            "laps_inserted": 0,
+            "weather_inserted": False,
+            "data_imported": False,
+            "perf_inserted": 0,
+            "stint_inserted": 0,
+            "error": f"Corrida {year} R{round_number} já existe na base de dados"
+        }
+    
     session = fastf1.get_session(year, round_number, 'R')
     loaded = False
     for load_args in [
@@ -129,9 +154,6 @@ def import_fastf1_race(year, round_number, race_name_override=None, status='comp
     if not loaded:
         raise RuntimeError('Não foi possível carregar a sessão do FastF1')
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-
     event = session.event
     race_name = race_name_override or str(event['EventName'])
     circuit = str(event['Location'])
@@ -140,10 +162,10 @@ def import_fastf1_race(year, round_number, race_name_override=None, status='comp
     total_laps = int(session.laps['LapNumber'].max()) if not session.laps.empty else 50
 
     cur.execute(
-        """INSERT INTO races (name, circuit, country, date, total_laps, status)
-           VALUES (%s, %s, %s, %s, %s, %s)
+        """INSERT INTO races (name, circuit, country, date, total_laps, round, year, status)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
            RETURNING race_id""",
-        (race_name, circuit, country, race_date, total_laps, status)
+        (race_name, circuit, country, race_date, total_laps, round_number, year, status)
     )
     race_id = cur.fetchone()[0]
 
@@ -168,7 +190,26 @@ def import_fastf1_race(year, round_number, race_name_override=None, status='comp
             team = str(driver_row.get('TeamName', 'Unknown'))
             position = safe_int(driver_row.get('Position'), 0)
             points = safe_int(driver_row.get('Points'), 0)
-            status_value = 'finished' if driver_row.get('Status') == 'Finished' else 'dnf'
+            
+            # Lógica para detetar o estado real do piloto (Finished, DNS, DNF, DSQ)
+            f1_status = str(driver_row.get('Status', '')).strip()
+            
+            # Verificar se o piloto tem voltas registadas (quem é DNS não tem voltas nem telemetria)
+            has_laps = False
+            if session.laps is not None and not session.laps.empty:
+                has_laps = not session.laps[session.laps['DriverNumber'].astype(str) == str(driver_id)].empty
+
+            if f1_status == 'Finished' or f1_status.startswith('+'):
+                status_value = 'finished'
+            elif f1_status == 'Disqualified':
+                status_value = 'dsq'
+            elif f1_status == 'DNS' or not has_laps:
+                # Se não tem voltas e não terminou/foi desqualificado, é DNS
+                status_value = 'dns'
+            else:
+                # Se tem voltas mas não terminou, é DNF
+                status_value = 'dnf'
+
             fastest_lap = safe_str(driver_row.get('FastestLapTime'))
             total_time = safe_str(driver_row.get('Time'))
 
@@ -259,7 +300,7 @@ def import_fastf1_race(year, round_number, race_name_override=None, status='comp
     conn.commit()
 
     cur.execute(
-        "SELECT race_id, name, circuit, country, date, total_laps, status FROM races WHERE race_id = %s",
+        "SELECT race_id, name, circuit, country, date, total_laps, status, round, year FROM races WHERE race_id = %s",
         (race_id,)
     )
     race_row = cur.fetchone()
@@ -268,7 +309,7 @@ def import_fastf1_race(year, round_number, race_name_override=None, status='comp
 
     return {
         "race_id": race_id,
-        "race": Race(*race_row).to_json() if race_row else None,
+        "race": Race(race_row[0], race_row[1], race_row[2], race_row[3], race_row[4], race_row[5], race_row[6], race_row[7], race_row[8]).to_json() if race_row else None,
         "results_inserted": results_inserted,
         "laps_inserted": laps_inserted,
         "weather_inserted": weather_inserted,
@@ -499,19 +540,19 @@ def get_races():
         
         if status:
             cur.execute(
-                "SELECT race_id, name, circuit, country, date, total_laps, status FROM races WHERE status = %s ORDER BY date DESC",
+                "SELECT race_id, name, circuit, country, date, total_laps, status, round, year FROM races WHERE status = %s ORDER BY date DESC",
                 (status,)
             )
         else:
             cur.execute(
-                "SELECT race_id, name, circuit, country, date, total_laps, status FROM races ORDER BY date DESC"
+                "SELECT race_id, name, circuit, country, date, total_laps, status, round, year FROM races ORDER BY date DESC"
             )
         
         rows = cur.fetchall()
         races = []
         
         for row in rows:
-            race = Race(*row)
+            race = Race(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8])
             races.append(race.to_json())
         
         cur.close()
@@ -531,14 +572,14 @@ def get_race(race_id):
         cur = conn.cursor()
         
         cur.execute(
-            "SELECT race_id, name, circuit, country, date, total_laps, status FROM races WHERE race_id = %s",
+            "SELECT race_id, name, circuit, country, date, total_laps, status, round, year FROM races WHERE race_id = %s",
             (race_id,)
         )
         
         row = cur.fetchone()
         
         if row:
-            race = Race(*row)
+            race = Race(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8])
             cur.close()
             conn.close()
             return jsonify(race.to_json()), 200
@@ -750,6 +791,56 @@ def create_race():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@results_blueprint.route('/races/<int:race_id>', methods=['DELETE'])
+def delete_race(race_id):
+    """Eliminar uma corrida e todos os seus dados associados"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Eliminar dados dependentes primeiro para respeitar a integridade referencial
+        cur.execute("DELETE FROM race_results WHERE race_id = %s", (race_id,))
+        cur.execute("DELETE FROM laps WHERE race_id = %s", (race_id,))
+        cur.execute("DELETE FROM weather WHERE race_id = %s", (race_id,))
+        
+        # Finalmente, eliminar a corrida
+        cur.execute("DELETE FROM races WHERE race_id = %s", (race_id,))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": f"Corrida {race_id} eliminada com sucesso"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@results_blueprint.route('/races/delete-multiple', methods=['POST'])
+def delete_multiple_races():
+    """Eliminar várias corridas e os seus dados associados de uma só vez"""
+    try:
+        data = request.get_json()
+        race_ids = data.get('race_ids', [])
+        if not race_ids:
+            return jsonify({"message": "Nenhuma corrida selecionada"}), 200
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        ids_tuple = tuple(race_ids)
+
+        # Eliminar dados dependentes em cascata manual para as corridas selecionadas
+        cur.execute("DELETE FROM race_results WHERE race_id IN %s", (ids_tuple,))
+        cur.execute("DELETE FROM laps WHERE race_id IN %s", (ids_tuple,))
+        cur.execute("DELETE FROM weather WHERE race_id IN %s", (ids_tuple,))
+        cur.execute("DELETE FROM races WHERE race_id IN %s", (ids_tuple,))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"message": f"{len(race_ids)} corrida(s) eliminada(s) com sucesso"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @results_blueprint.route('/races/demo', methods=['POST'])
 def create_demo_race():
@@ -759,7 +850,7 @@ def create_demo_race():
         cur = conn.cursor()
 
         cur.execute(
-            "SELECT race_id, name, circuit, country, date, total_laps, status FROM races WHERE name = %s ORDER BY created_at DESC LIMIT 1",
+            "SELECT race_id, name, circuit, country, date, total_laps, status, round, year FROM races WHERE name = %s ORDER BY created_at DESC LIMIT 1",
             (DEMO_RACE_NAME,)
         )
         row = cur.fetchone()
@@ -770,7 +861,7 @@ def create_demo_race():
             cur.execute("SELECT COUNT(*) FROM laps WHERE race_id = %s", (row[0],))
             laps_count = cur.fetchone()[0]
 
-            race = Race(*row)
+            race = Race(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8])
             if results_count > 0 and laps_count > 0:
                 try:
                     data_service_url = os.getenv('DATA_SERVICE', 'http://data-service:5003')
@@ -802,10 +893,10 @@ def create_demo_race():
             race_id = race.race_id
         else:
             cur.execute(
-                """INSERT INTO races (name, circuit, country, date, total_laps, status)
-                   VALUES (%s, %s, %s, %s, %s, %s)
+                """INSERT INTO races (name, circuit, country, date, total_laps, round, year, status)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                    RETURNING race_id""",
-                (DEMO_RACE_NAME, DEMO_RACE_CIRCUIT, DEMO_RACE_COUNTRY, DEMO_RACE_DATE, DEMO_RACE_TOTAL_LAPS, 'live')
+                (DEMO_RACE_NAME, DEMO_RACE_CIRCUIT, DEMO_RACE_COUNTRY, DEMO_RACE_DATE, DEMO_RACE_TOTAL_LAPS, 999, 2026, 'live')
             )
             race_id = cur.fetchone()[0]
             conn.commit()
@@ -832,7 +923,7 @@ def create_demo_race():
             print(f"Erro ao preparar demo no data service: {seed_error}")
 
         cur.execute(
-            "SELECT race_id, name, circuit, country, date, total_laps, status FROM races WHERE race_id = %s",
+            "SELECT race_id, name, circuit, country, date, total_laps, status, round, year FROM races WHERE race_id = %s",
             (race_id,)
         )
         seeded_row = cur.fetchone()
@@ -842,7 +933,7 @@ def create_demo_race():
         return jsonify({
             "created": True,
             "race_id": race_id,
-            "race": Race(*seeded_row).to_json() if seeded_row else None,
+            "race": Race(seeded_row[0], seeded_row[1], seeded_row[2], seeded_row[3], seeded_row[4], seeded_row[5], seeded_row[6], seeded_row[7], seeded_row[8]).to_json() if seeded_row else None,
             "results_inserted": len(DEMO_RESULTS),
             "laps_inserted": len(DEMO_LAPS),
             "weather_inserted": True,

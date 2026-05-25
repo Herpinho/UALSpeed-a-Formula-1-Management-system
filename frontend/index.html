@@ -43,7 +43,7 @@
             background: var(--bg);
             color: var(--text);
             font-family: var(--font-mono);
-            font-size: 13px;
+            font-size: 15px;
             overflow-x: hidden;
         }
         
@@ -677,7 +677,88 @@
          ::-webkit-scrollbar {
             width: 5px;
         }
-        
+        /* ─── Estilos Modal Selecionar Corrida ─────────────────────────────────── */
+        .year-group {
+            margin-bottom: 8px;
+        }
+
+        .year-group summary {
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 12px 16px;
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 1rem;
+            color: var(--text);
+            cursor: pointer;
+            list-style: none;
+            transition: all .2s;
+            user-select: none;
+        }
+
+        .year-group summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .year-group summary::before {
+            content: '▼';
+            display: inline-block;
+            margin-right: 10px;
+            font-size: 0.7rem;
+            transition: transform .2s;
+        }
+
+        .year-group[open] summary::before {
+            transform: rotate(180deg);
+        }
+
+        .year-group summary:hover {
+            background: var(--bg3);
+            border-color: var(--red);
+        }
+
+        .year-content {
+            margin-top: 8px;
+            padding-left: 8px;
+        }
+
+        .custom-option {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 10px 14px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: all .2s;
+            user-select: none;
+        }
+
+        .custom-option:hover {
+            border-color: var(--red);
+            background: var(--bg3);
+        }
+
+        .custom-option.selected {
+            border-color: var(--gold);
+            background: rgba(255, 215, 0, .08);
+        }
+
+        .race-name {
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: .95rem;
+            color: var(--text);
+        }
+
+        .race-date {
+            font-size: .75rem;
+            color: var(--muted);
+            text-align: right;
+        }
          ::-webkit-scrollbar-track {
             background: var(--bg);
         }
@@ -707,11 +788,12 @@
 ════════════════════════════════════════════════════════════════════════════ -->
     <div id="page-live" class="page active">
 
-        <!-- Seletor de corrida -->
+        <!-- Controlo de Seleção de Corrida -->
         <div class="race-controls">
-            <select id="race-select" class="race-select" onchange="selectRace(this.value)">
-      <option value="">— Selecionar corrida —</option>
-    </select>
+            <button class="btn btn-secondary" onclick="openRaceModal()" style="width: 100%; text-align: left; display: flex; justify-content: space-between; align-items: center; background: var(--bg2); border: 1px solid var(--border); padding: 12px 16px; margin-bottom: 10px;">
+                <span id="selected-race-label" style="font-family: var(--font-display); font-weight: 700; letter-spacing: 1px; color: var(--text); font-size: 1.1rem;">— SELECIONAR CORRIDA —</span>
+                <span style="font-size: 0.7rem; color: var(--muted);">▼</span>
+            </button>
         </div>
 
         <!-- Estatísticas: CORRIDA | PISTA | Nº DE PILOTOS | CONDIÇÕES METEOROLÓGICAS -->
@@ -804,6 +886,7 @@
                 <!-- Botão Adicionar Corrida -->
                 <div style="margin-bottom:24px">
                     <button class="btn btn-primary" onclick="openImportModal()" style="font-size:1rem;padding:12px 28px">+ ADICIONAR CORRIDA</button>
+                    <button class="btn btn-danger" onclick="openDeleteModal()" style="font-size:1rem;padding:12px 28px;margin-left:10px">🗑 ELIMINAR CORRIDA</button>
                 </div>
                 <div class="section-title">Equipas</div>
                 <div class="card" style="margin-bottom:16px">
@@ -961,6 +1044,20 @@
             </div>
     </div>
 
+    <!-- ─── Modal Selecionar Corrida ───────────────────────────────────────── -->
+    <div class="modal-overlay" id="race-modal">
+        <div class="modal">
+            <div class="modal-title">
+                🔍 SELECIONAR CORRIDA
+                <button class="modal-close" onclick="closeRaceModal()">✕</button>
+            </div>
+            <p style="color:var(--muted); font-size:0.85rem; margin-bottom:15px;">Escolha uma corrida para visualizar os dados:</p>
+            <div class="race-list" id="modal-race-list" style="max-height: 500px;">
+                <!-- Populado via JS -->
+            </div>
+        </div>
+    </div>
+
     <!-- ─── Modal Importar Corrida ───────────────────────────────────────────── -->
     <div class="modal-overlay" id="import-modal">
         <div class="modal">
@@ -985,6 +1082,28 @@
             <div id="calendar-loading" style="display:none;color:var(--muted);font-size:.85rem">A carregar calendário...</div>
             <div class="race-list" id="race-list"></div>
             <div class="import-status" id="import-status"></div>
+        </div>
+    </div>
+
+    <!-- ─── Modal Eliminar Corridas ─────────────────────────────────────────── -->
+    <div class="modal-overlay" id="delete-modal">
+        <div class="modal">
+            <div class="modal-title">
+                🗑 ELIMINAR CORRIDAS
+                <button class="modal-close" onclick="closeDeleteModal()">✕</button>
+            </div>
+            <p style="color:var(--muted); font-size:0.85rem; margin-bottom:15px;">Selecione as corridas que deseja remover permanentemente:</p>
+            <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text); padding-left: 14px;">
+                <input type="checkbox" id="select-all-checkbox" onclick="toggleSelectAll(this.checked)" style="width:18px; height:18px; cursor:pointer;">
+                <label for="select-all-checkbox" style="cursor:pointer; letter-spacing: 1px; font-family: var(--font-display); font-weight: 700;">SELECIONAR TODAS</label>
+            </div>
+            <div class="race-list" id="delete-race-list">
+                <!-- Populado via JS -->
+            </div>
+            <div style="margin-top:20px; display:flex; gap:10px; justify-content:flex-end;">
+                <button class="btn btn-secondary" onclick="closeDeleteModal()">CANCELAR</button>
+                <button class="btn btn-danger" onclick="executeBulkDelete()">ELIMINAR SELECIONADAS</button>
+            </div>
         </div>
     </div>
 
@@ -1049,41 +1168,166 @@
            PÁGINA 1 — CORRIDA AO VIVO
         ══════════════════════════════════════════════════════════════════════════════ */
 
+        function openRaceModal() {
+            document.getElementById('race-modal').classList.add('active');
+            loadRaces();
+        }
+
+        function closeRaceModal() {
+            document.getElementById('race-modal').classList.remove('active');
+        }
+
+        function selectCustomRace(id, name) {
+            document.getElementById('selected-race-label').textContent = name.toUpperCase();
+            closeRaceModal();
+            selectRace(id);
+        }
+
         async function loadRaces() {
             const races = await apiFetch(`${API.results}/races`);
-            const sel = document.getElementById('race-select');
+            const list = document.getElementById('modal-race-list');
+            
             if (!races) return;
-            sel.innerHTML = '<option value="">— Selecionar corrida —</option>';
+
+            // Agrupar por ano
+            const grouped = {};
             races.forEach(r => {
-                const opt = document.createElement('option');
-                opt.value = r.race_id;
-                opt.text = r.name && r.name.toLowerCase().includes('demo')
-                    ? `${r.name} · DEMO (${r.status})`
-                    : `${r.name} (${r.status})`;
-                sel.appendChild(opt);
+                const year = new Date(r.date).getFullYear();
+                if (!grouped[year]) grouped[year] = [];
+                grouped[year].push(r);
             });
 
-            const savedRaceId = localStorage.getItem('ualspeed_current_race_id');
-            if (savedRaceId && Array.from(sel.options).some(opt => opt.value === savedRaceId)) {
-                sel.value = savedRaceId;
-                if (currentRaceId !== savedRaceId) {
-                    await selectRace(savedRaceId);
+            const years = Object.keys(grouped).sort((a, b) => b - a);
+            
+            list.innerHTML = years.map(year => {
+                // Ordenar por data ascendente dentro do ano
+                const racesInYear = grouped[year].sort((a,b) => new Date(a.date) - new Date(b.date));
+                return `
+                    <details class="year-group">
+                        <summary>${year}</summary>
+                        <div class="year-content">
+                            ${racesInYear.map((r, index) => {
+                                const dateFmt = new Date(r.date).toLocaleDateString('pt-PT');
+                                const isSelected = currentRaceId == r.race_id ? 'selected' : '';
+                                const displayName = r.name && r.name.toLowerCase().includes('demo') ? `${r.name} · DEMO` : r.name;
+                                const roundNumber = r.round || (index + 1);
+                                return `
+                                    <div class="custom-option ${isSelected}" onclick="selectCustomRace('${r.race_id}', '${displayName}')">
+                                        <span class="race-name">R${roundNumber} - ${displayName}</span>
+                                        <span class="race-date">${dateFmt}</span>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </details>
+                `;
+            }).join('');
+        }
+
+        function openDeleteModal() {
+            document.getElementById('delete-modal').classList.add('active');
+            loadRacesForDeletion();
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('delete-modal').classList.remove('active');
+        }
+
+        async function loadRacesForDeletion() {
+            const list = document.getElementById('delete-race-list');
+            const selectAll = document.getElementById('select-all-checkbox');
+            
+            if (selectAll) selectAll.checked = false;
+            list.innerHTML = '<div class="empty">A carregar corridas...</div>';
+            
+            const races = await apiFetch(`${API.results}/races`);
+            if (!races || races.length === 0) {
+                list.innerHTML = '<div class="empty">Não existem corridas na base de dados.</div>';
+                return;
+            }
+
+            // Agrupar por ano
+            const grouped = {};
+            races.forEach(r => {
+                const year = new Date(r.date).getFullYear();
+                if (!grouped[year]) grouped[year] = [];
+                grouped[year].push(r);
+            });
+
+            const years = Object.keys(grouped).sort((a, b) => b - a);
+            
+            list.innerHTML = years.map(year => {
+                // Ordenar por data ascendente dentro do ano
+                const racesInYear = grouped[year].sort((a,b) => new Date(a.date) - new Date(b.date));
+                return `
+                    <details class="year-group">
+                        <summary>${year}</summary>
+                        <div class="year-content">
+                            ${racesInYear.map((r) => {
+                                const dateFmt = new Date(r.date).toLocaleDateString('pt-PT');
+                                const roundNumber = r.round || '—';
+                                return `
+                                    <div class="race-list-item" style="cursor: default; display:flex; align-items:center; gap:12px;">
+                                        <input type="checkbox" class="delete-checkbox" value="${r.race_id}" style="width:18px; height:18px; cursor:pointer;">
+                                        <div style="flex: 1;">
+                                            <div class="race-list-name">R${roundNumber} · ${r.name}</div>
+                                            <div class="race-list-info">${r.circuit} (${dateFmt})</div>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </details>
+                `;
+            }).join('');
+        }
+
+        function toggleSelectAll(checked) {
+            const checkboxes = document.querySelectorAll('.delete-checkbox');
+            checkboxes.forEach(cb => cb.checked = checked);
+        }
+
+        async function executeBulkDelete() {
+            const checkboxes = document.querySelectorAll('.delete-checkbox:checked');
+            const ids = Array.from(checkboxes).map(cb => parseInt(cb.value));
+
+            if (ids.length === 0) {
+                toast('Selecione pelo menos uma corrida para eliminar.', true);
+                return;
+            }
+
+            if (!confirm(`Tem a certeza que deseja eliminar ${ids.length} corrida(s)? Esta ação é irreversível e apagará todos os resultados e telemetria associados.`)) {
+                return;
+            }
+
+            const res = await apiFetch(`${API.results}/races/delete-multiple`, {
+                method: 'POST',
+                body: JSON.stringify({ race_ids: ids })
+            });
+
+            if (res && !res.error) {
+                toast(res.message || 'Corridas eliminadas com sucesso!');
+                if (ids.includes(parseInt(currentRaceId))) {
+                    localStorage.removeItem('ualspeed_current_race_id');
                 }
+                location.reload(); 
+            } else {
+                toast('Erro ao eliminar corridas', true);
             }
         }
 
         async function selectRace(id) {
             currentRaceId = id || null;
-            const raceSelect = document.getElementById('race-select');
-            if (raceSelect) {
-                raceSelect.value = id || '';
-            }
+            selectedDriver = null;
             if (id) {
                 localStorage.setItem('ualspeed_current_race_id', String(id));
             } else {
                 localStorage.removeItem('ualspeed_current_race_id');
             }
             if (!id) return;
+
+            // Limpar telemetria anterior
+            document.getElementById('telemetry-cards').innerHTML = '<div class="empty">A aguardar dados dos carros...</div>';
 
             // Vai buscar detalhes da corrida (circuit, country, etc.)
             const race = await apiFetch(`${API.results}/races/${id}`);
@@ -1275,16 +1519,26 @@
             const avgBrake = performance?.avg_brake ?? driverTelemetry?.avg_brake;
             const drsTime = performance?.drs_time ?? driverTelemetry?.drs_time;
             const bestLap = performance?.best_lap_time || driver.fastest_lap || '—';
-            const totalTime = driver.total_time || '—';
             const teamName = driver.team_name || '—';
             const driverNumber = driver.driver_number || driver.driver_id || '—';
             const points = driver.points ?? '—';
-            const gapToLeader = driver.gap_to_leader || '—';
+
+            let totalTime = driver.total_time || '—';
+            let gapToLeader = driver.gap_to_leader || '—';
+
+            // Só forçamos DNF se não houver uma informação de voltas de atraso no gap
+            if (driver.status === 'dnf' && !gapToLeader.includes('Lap')) {
+                totalTime = 'DNF';
+                gapToLeader = 'DNF';
+            } else if (driver.status === 'dns') {
+                totalTime = 'DNS';
+                gapToLeader = 'DNS';
+            }
 
             const cards = [
                 { label: 'VEL. MÁX (VOLTA)', value: formatMetricNumber(maxSpeed, 0), unit: 'km/h', color: 'var(--red)' },
                 { label: 'RPM MÁXIMO', value: Number.isFinite(Number(maxRpm)) ? Number(maxRpm).toLocaleString() : '—', unit: 'rpm', color: 'var(--gold)' },
-                { label: 'ACELERADOR MÉDIO', value: formatMetricNumber(avgThrottle, 1), unit: '%', color: 'var(--up)' },
+                { label: 'ACELERADOR MÉDIO', value: driver.status === 'dns' ? '—' : formatMetricNumber(avgThrottle, 1), unit: driver.status === 'dns' ? '' : '%', color: 'var(--up)' },
                 { label: 'TRAVAGEM MÉDIA', value: formatMetricNumber(avgBrake, 1), unit: '%', color: 'var(--red)' },
                 { label: 'TEMPO DRS', value: formatDRSTime(drsTime), unit: '', color: 'var(--up)' },
                 { label: 'ESTRATÉGIA DE PNEUS', value: compoundStrategy, unit: '', color: 'var(--red)' },
@@ -1673,20 +1927,33 @@
             list.innerHTML = '';
             loading.style.display = 'block';
             const data = await apiFetch(`${API.results}/calendar/${year}`);
+            const importedRaces = await apiFetch(`${API.results}/races`);
             loading.style.display = 'none';
             if (!data || !data.races) {
                 list.innerHTML = '<div class="empty">Erro ao carregar calendário</div>';
                 return;
             }
-            list.innerHTML = data.races.map(r => `
-                <div class="race-list-item" onclick="importRace(${year}, ${r.round}, this)" data-name="${r.name}">
+            
+            // Criar um Set com as corridas já importadas (year + round)
+            const importedSet = new Set();
+            if (importedRaces) {
+                importedRaces.forEach(r => {
+                    importedSet.add(`${r.year}-${r.round}`);
+                });
+            }
+            
+            list.innerHTML = data.races.map(r => {
+                const key = `${year}-${r.round}`;
+                const isImported = importedSet.has(key);
+                return `
+                <div class="race-list-item ${isImported ? 'importing' : ''}" ${!isImported ? `onclick="importRace(${year}, ${r.round}, this)"` : ''} data-name="${r.name}" style="${isImported ? 'opacity: 0.6; cursor: not-allowed;' : ''}">
                     <div>
                         <div class="race-list-name">R${r.round} · ${r.name}</div>
                         <div class="race-list-info">${r.circuit}, ${r.country}</div>
                     </div>
-                    <div class="race-list-date">${r.date}</div>
+                    <div class="race-list-date">${isImported ? '✅ Importado' : r.date}</div>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
         async function importRace(year, round, el) {
@@ -1701,10 +1968,16 @@
             });
             el.classList.remove('importing');
             if (res && res.race_id) {
-                status.className = 'import-status success';
-                status.textContent = `✅ ${name} importado! ${res.results_inserted} resultados, ${res.laps_inserted} voltas.`;
-                await loadRaces();
-                toast(`${name} adicionado com sucesso!`);
+                if (res.error) {
+                    status.className = 'import-status loading';
+                    status.textContent = `⚠️ ${res.error}`;
+                    toast(res.error, true);
+                } else {
+                    status.className = 'import-status success';
+                    status.textContent = `✅ ${name} importado! ${res.results_inserted} resultados, ${res.laps_inserted} voltas.`;
+                    await loadRaces();
+                    toast(`${name} adicionado com sucesso!`);
+                }
             } else {
                 status.className = 'import-status loading';
                 status.textContent = `❌ Erro ao importar ${name}.`;
@@ -1715,6 +1988,14 @@
             document.getElementById('import-modal').addEventListener('click', function(e) {
                 if (e.target === this) closeImportModal();
             });
+            
+            // Fechar modais ao clicar fora
+            window.addEventListener('click', (e) => {
+                if (e.target.classList.contains('modal-overlay')) {
+                    e.target.classList.remove('active');
+                }
+            });
+
             await loadRaces();
             metricsInterval = setInterval(() => {
                 const metricsPage = document.getElementById('page-metrics');

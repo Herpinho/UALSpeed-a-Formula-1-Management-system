@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS public.races (
     country VARCHAR(100) NOT NULL,
     date DATE,
     total_laps INTEGER NOT NULL,
+    round INTEGER,
+    year INTEGER,
     status VARCHAR(20) DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'live', 'completed')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

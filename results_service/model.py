@@ -1,12 +1,14 @@
 class Race:
-    def __init__(self, race_id, name, circuit, country, date, total_laps, status):
+    def __init__(self, race_id, name, circuit, country, date, total_laps, status, round=None, year=None):
         self.race_id = race_id
         self.name = name
         self.circuit = circuit
         self.country = country
         self.date = date
         self.total_laps = total_laps
-        self.status = status  
+        self.status = status
+        self.round = round
+        self.year = year
 
     def to_json(self):
         return {
@@ -16,7 +18,9 @@ class Race:
             "country": self.country,
             "date": str(self.date) if self.date else None,
             "total_laps": self.total_laps,
-            "status": self.status
+            "status": self.status,
+            "round": self.round,
+            "year": self.year
         }
 
 
