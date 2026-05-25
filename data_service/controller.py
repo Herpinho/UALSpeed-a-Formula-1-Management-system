@@ -4,6 +4,7 @@ import psycopg2.extras
 import os
 import time
 import math
+from datetime import datetime, timedelta, timezone
 import fastf1
 from model import Car, CarPerformance, Stint
 import requests
@@ -16,6 +17,27 @@ fastf1.Cache.enable_cache(CACHE_DIR)
 
 ERROR_RESPONSE_DATA = {'error': 'Error getting data, retry or contact support if problem persists.'}
 ERROR_STATUS_CODE = 500
+
+DEMO_PERFORMANCE = [
+    {'driver_id': 44, 'driver_name': 'Alex Martins', 'max_speed': 332.0, 'max_rpm': 12850, 'avg_throttle': 78.4, 'avg_brake': 16.2, 'drs_time': 18.6, 'best_lap_time': '1:29.824', 'total_laps': 5},
+    {'driver_id': 16, 'driver_name': 'Sofia Pereira', 'max_speed': 329.4, 'max_rpm': 12790, 'avg_throttle': 76.8, 'avg_brake': 17.9, 'drs_time': 16.2, 'best_lap_time': '1:30.102', 'total_laps': 5},
+    {'driver_id': 11, 'driver_name': 'Tomás Costa', 'max_speed': 326.8, 'max_rpm': 12690, 'avg_throttle': 74.5, 'avg_brake': 18.7, 'drs_time': 14.9, 'best_lap_time': '1:30.488', 'total_laps': 5},
+]
+
+DEMO_STINTS = [
+    {'driver_id': 44, 'driver_name': 'Alex Martins', 'stint_number': 1, 'compound': 'SOFT', 'lap_start': 1, 'lap_end': 3, 'tyre_age': 0, 'is_fresh': True},
+    {'driver_id': 44, 'driver_name': 'Alex Martins', 'stint_number': 2, 'compound': 'MEDIUM', 'lap_start': 4, 'lap_end': 5, 'tyre_age': 2, 'is_fresh': False},
+    {'driver_id': 16, 'driver_name': 'Sofia Pereira', 'stint_number': 1, 'compound': 'SOFT', 'lap_start': 1, 'lap_end': 2, 'tyre_age': 0, 'is_fresh': True},
+    {'driver_id': 16, 'driver_name': 'Sofia Pereira', 'stint_number': 2, 'compound': 'MEDIUM', 'lap_start': 3, 'lap_end': 5, 'tyre_age': 2, 'is_fresh': False},
+    {'driver_id': 11, 'driver_name': 'Tomás Costa', 'stint_number': 1, 'compound': 'SOFT', 'lap_start': 1, 'lap_end': 3, 'tyre_age': 0, 'is_fresh': True},
+    {'driver_id': 11, 'driver_name': 'Tomás Costa', 'stint_number': 2, 'compound': 'HARD', 'lap_start': 4, 'lap_end': 5, 'tyre_age': 1, 'is_fresh': False},
+]
+
+DEMO_CARS = [
+    {'driver_id': 44, 'speed': 332, 'rpm': 12850, 'throttle': 82, 'brake': 8, 'drs': True, 'gear': 8, 'lap': 5},
+    {'driver_id': 16, 'speed': 329, 'rpm': 12790, 'throttle': 79, 'brake': 10, 'drs': True, 'gear': 8, 'lap': 5},
+    {'driver_id': 11, 'speed': 327, 'rpm': 12690, 'throttle': 75, 'brake': 12, 'drs': False, 'gear': 7, 'lap': 5},
+]
 
 data_blueprint = Blueprint('data', __name__)
 
@@ -108,6 +130,202 @@ def demo_failure():
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@data_blueprint.route('/demo/seed', methods=['POST'])
+def seed_demo_metrics():
+    """Cria dados sintéticos da demo para telemetria e estratégia."""
+    try:
+        body = request.get_json(silent=True) or {}
+        race_id = body.get('race_id')
+        if not race_id:
+            return jsonify({'error': 'race_id é obrigatório'}), 400
+
+        db = get_db_connection()
+        cur = db.cursor()
+
+        cur.execute("DELETE FROM cars WHERE race_id = %s", (race_id,))
+        cur.execute("DELETE FROM car_performance WHERE race_id = %s", (race_id,))
+        cur.execute("DELETE FROM stints WHERE race_id = %s", (race_id,))
+
+        base_time = datetime.now(timezone.utc)
+        for index, car in enumerate(DEMO_CARS):
+            cur.execute(
+                """INSERT INTO cars
+                   (race_id, driver_id, speed, rpm, throttle, brake, drs, gear, lap, data_time)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (race_id, car['driver_id'], car['speed'], car['rpm'], car['throttle'], car['brake'], car['drs'], car['gear'], car['lap'], base_time + timedelta(seconds=index))
+            )
+
+        for perf in DEMO_PERFORMANCE:
+            cur.execute(
+                """INSERT INTO car_performance
+                   (race_id, driver_id, driver_name, max_speed, max_rpm, avg_throttle, avg_brake, drs_time, best_lap_time, total_laps)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (race_id, driver_id) DO UPDATE SET
+                       driver_name = EXCLUDED.driver_name,
+                       max_speed = EXCLUDED.max_speed,
+                       max_rpm = EXCLUDED.max_rpm,
+                       avg_throttle = EXCLUDED.avg_throttle,
+                       avg_brake = EXCLUDED.avg_brake,
+                       drs_time = EXCLUDED.drs_time,
+                       best_lap_time = EXCLUDED.best_lap_time,
+                       total_laps = EXCLUDED.total_laps""",
+                (race_id, perf['driver_id'], perf['driver_name'], perf['max_speed'], perf['max_rpm'], perf['avg_throttle'], perf['avg_brake'], perf['drs_time'], perf['best_lap_time'], perf['total_laps'])
+            )
+
+        for stint in DEMO_STINTS:
+            cur.execute(
+                """INSERT INTO stints
+                   (race_id, driver_id, driver_name, stint_number, compound, lap_start, lap_end, tyre_age, is_fresh)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (race_id, stint['driver_id'], stint['driver_name'], stint['stint_number'], stint['compound'], stint['lap_start'], stint['lap_end'], stint['tyre_age'], stint['is_fresh'])
+            )
+
+        db.commit()
+        cur.close()
+        db.close()
+
+        return jsonify({
+            'message': 'demo metrics seeded',
+            'race_id': race_id,
+            'cars_inserted': len(DEMO_CARS),
+            'perf_inserted': len(DEMO_PERFORMANCE),
+            'stint_inserted': len(DEMO_STINTS)
+        }), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@data_blueprint.route('/demo/copy-telemetry', methods=['POST'])
+def copy_demo_telemetry():
+    """Copia a telemetria do piloto fonte (por defeito 'Leclerc' na corrida) para os restantes pilotos da mesma corrida."""
+    try:
+        body = request.get_json(silent=True) or {}
+        race_id = body.get('race_id')
+        source_driver_id = body.get('source_driver_id')
+
+        if not race_id:
+            return jsonify({'error': 'race_id é obrigatório'}), 400
+
+        db = get_db_connection()
+        cur = db.cursor()
+
+        # Encontrar piloto fonte: procura por driver_name contendo 'leclerc' se source_driver_id não for fornecido
+        source = None
+        if source_driver_id:
+            cur.execute("SELECT driver_id, driver_name, max_speed, max_rpm, avg_throttle, avg_brake, drs_time, best_lap_time, total_laps FROM car_performance WHERE race_id = %s AND driver_id = %s", (race_id, source_driver_id))
+            source = cur.fetchone()
+
+        if not source:
+            cur.execute("SELECT driver_id, driver_name, max_speed, max_rpm, avg_throttle, avg_brake, drs_time, best_lap_time, total_laps FROM car_performance WHERE race_id = %s AND driver_name ILIKE %s LIMIT 1", (race_id, '%leclerc%'))
+            source = cur.fetchone()
+
+        # fallback: primeiro piloto encontrado
+        if not source:
+            cur.execute("SELECT driver_id, driver_name, max_speed, max_rpm, avg_throttle, avg_brake, drs_time, best_lap_time, total_laps FROM car_performance WHERE race_id = %s ORDER BY driver_id LIMIT 1", (race_id,))
+            source = cur.fetchone()
+
+        if not source:
+            cur.close()
+            db.close()
+            return jsonify({'error': 'Fonte de telemetria não encontrada para esta corrida'}), 404
+
+        (s_driver_id, s_driver_name, s_max_speed, s_max_rpm, s_avg_throttle, s_avg_brake, s_drs_time, s_best_lap_time, s_total_laps) = source
+
+        # obter último estado do carro fonte
+        cur.execute("SELECT speed, rpm, throttle, brake, drs, gear, lap, data_time FROM cars WHERE race_id = %s AND driver_id = %s ORDER BY data_time DESC LIMIT 1", (race_id, s_driver_id))
+        last_car = cur.fetchone()
+
+        # listar pilotos alvo
+        # 1) pilotos já existentes em car_performance
+        cur.execute("SELECT driver_id, driver_name FROM car_performance WHERE race_id = %s AND driver_id != %s", (race_id, s_driver_id))
+        targets_map = {int(did): (name or f"#{did}") for did, name in cur.fetchall()}
+
+        # 2) completar com todos os pilotos da classificação no results_service
+        try:
+            results_service_url = os.getenv('RESULTS_SERVICE', 'http://results-service:5002')
+            classification_resp = requests.get(
+                f"{results_service_url}/results/classification/{race_id}",
+                timeout=5
+            )
+            if classification_resp.ok:
+                payload = classification_resp.json() or {}
+                for item in payload.get('classification', []):
+                    driver_id = item.get('driver_id')
+                    if driver_id is None:
+                        continue
+                    driver_id = int(driver_id)
+                    if driver_id == s_driver_id:
+                        continue
+                    driver_name = item.get('driver_name') or targets_map.get(driver_id) or f"#{driver_id}"
+                    targets_map[driver_id] = driver_name
+        except Exception:
+            # Se o results_service falhar, segue com os pilotos já conhecidos no data_service.
+            pass
+
+        targets = sorted(targets_map.items(), key=lambda x: x[0])
+
+        cars_inserted = 0
+        perf_updated = 0
+        stints_copied = 0
+
+        now = datetime.now(timezone.utc)
+        for idx, (t_driver_id, t_driver_name) in enumerate(targets):
+            # atualizar car_performance para o piloto alvo
+            cur.execute(
+                """
+                INSERT INTO car_performance (race_id, driver_id, driver_name, max_speed, max_rpm, avg_throttle, avg_brake, drs_time, best_lap_time, total_laps)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (race_id, driver_id) DO UPDATE SET
+                    max_speed=EXCLUDED.max_speed, max_rpm=EXCLUDED.max_rpm,
+                    avg_throttle=EXCLUDED.avg_throttle, avg_brake=EXCLUDED.avg_brake,
+                    drs_time=EXCLUDED.drs_time, best_lap_time=EXCLUDED.best_lap_time,
+                    total_laps=EXCLUDED.total_laps
+                """,
+                (race_id, t_driver_id, t_driver_name, s_max_speed, s_max_rpm, s_avg_throttle, s_avg_brake, s_drs_time, s_best_lap_time, s_total_laps)
+            )
+            perf_updated += 1
+
+            # inserir estado de carro mais recente do fonte para o alvo (1 registo por piloto)
+            if last_car:
+                (s_speed, s_rpm, s_throttle, s_brake, s_drs, s_gear, s_lap, s_data_time) = last_car
+                insert_time = now + timedelta(seconds=idx)
+                cur.execute(
+                    "INSERT INTO cars (race_id, driver_id, speed, rpm, throttle, brake, drs, gear, lap, data_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (race_id, t_driver_id, s_speed, s_rpm, s_throttle, s_brake, s_drs, s_gear, s_lap, insert_time)
+                )
+                cars_inserted += 1
+
+            # copiar stints do fonte para o alvo (remover stints existentes do alvo primeiro)
+            cur.execute("DELETE FROM stints WHERE race_id = %s AND driver_id = %s", (race_id, t_driver_id))
+            cur.execute("SELECT stint_number, compound, lap_start, lap_end, tyre_age, is_fresh FROM stints WHERE race_id = %s AND driver_id = %s ORDER BY stint_number", (race_id, s_driver_id))
+            s_stints = cur.fetchall()
+            for s in s_stints:
+                cur.execute(
+                    "INSERT INTO stints (race_id, driver_id, driver_name, stint_number, compound, lap_start, lap_end, tyre_age, is_fresh) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (race_id, t_driver_id, t_driver_name, s[0], s[1], s[2], s[3], s[4], s[5])
+                )
+                stints_copied += 1
+
+        db.commit()
+        cur.close()
+        db.close()
+
+        return jsonify({
+            'message': 'Telemetry copied',
+            'race_id': race_id,
+            'source_driver_id': s_driver_id,
+            'source_driver_name': s_driver_name,
+            'targets': len(targets),
+            'cars_inserted': cars_inserted,
+            'perf_updated': perf_updated,
+            'stints_copied': stints_copied
+        }), 200
+
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 @data_blueprint.route('/race/<race_id>/start', methods=['PUT'])
 def start_race(race_id):

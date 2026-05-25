@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 import psycopg2
 import os
+import math
 import fastf1
 import requests
 from model import Race, RaceResult, Lap, Standing, Driver, Team
@@ -18,6 +19,263 @@ DB_CONFIG = {
 def get_db_connection():
     """Cria conexão com a base de dados"""
     return psycopg2.connect(**DB_CONFIG)
+
+
+DEMO_RACE_NAME = os.getenv('DEMO_RACE_NAME', 'UALSpeed Demo Race')
+DEMO_RACE_CIRCUIT = os.getenv('DEMO_RACE_CIRCUIT', 'UALSpeed Circuit')
+DEMO_RACE_COUNTRY = os.getenv('DEMO_RACE_COUNTRY', 'Portugal')
+DEMO_RACE_DATE = os.getenv('DEMO_RACE_DATE', '2026-05-25')
+DEMO_RACE_TOTAL_LAPS = int(os.getenv('DEMO_RACE_TOTAL_LAPS', '5'))
+
+DEMO_RESULTS = [
+    {'driver_id': 44, 'driver_name': 'Alex Martins', 'team': 'Red Falcon', 'position': 1, 'points': 25, 'fastest_lap': '1:29.824', 'total_time': '00:45:12.421', 'status': 'finished'},
+    {'driver_id': 16, 'driver_name': 'Sofia Pereira', 'team': 'Blue Arrow', 'position': 2, 'points': 18, 'fastest_lap': '1:30.102', 'total_time': '00:45:18.775', 'status': 'finished'},
+    {'driver_id': 11, 'driver_name': 'Tomás Costa', 'team': 'Silver Pulse', 'position': 3, 'points': 15, 'fastest_lap': '1:30.488', 'total_time': '00:45:25.110', 'status': 'finished'},
+]
+
+DEMO_LAPS = [
+    (44, 'Alex Martins', 1, '1:31.200', '0:31.000', '0:30.200', '0:30.000', 1),
+    (44, 'Alex Martins', 2, '1:30.980', '0:30.920', '0:30.100', '0:29.960', 1),
+    (44, 'Alex Martins', 3, '1:30.620', '0:30.780', '0:29.980', '0:29.860', 1),
+    (44, 'Alex Martins', 4, '1:30.112', '0:30.510', '0:29.820', '0:29.782', 1),
+    (44, 'Alex Martins', 5, '1:29.824', '0:30.300', '0:29.700', '0:29.824', 1),
+    (16, 'Sofia Pereira', 1, '1:31.740', '0:31.220', '0:30.310', '0:30.210', 2),
+    (16, 'Sofia Pereira', 2, '1:31.060', '0:30.940', '0:30.090', '0:30.030', 2),
+    (16, 'Sofia Pereira', 3, '1:30.740', '0:30.800', '0:29.950', '0:29.990', 2),
+    (16, 'Sofia Pereira', 4, '1:30.332', '0:30.640', '0:29.850', '0:29.842', 2),
+    (16, 'Sofia Pereira', 5, '1:30.102', '0:30.420', '0:29.760', '0:29.922', 2),
+    (11, 'Tomás Costa', 1, '1:32.010', '0:31.500', '0:30.300', '0:30.210', 3),
+    (11, 'Tomás Costa', 2, '1:31.480', '0:31.180', '0:30.140', '0:30.160', 3),
+    (11, 'Tomás Costa', 3, '1:31.040', '0:30.950', '0:30.020', '0:30.070', 3),
+    (11, 'Tomás Costa', 4, '1:30.720', '0:30.710', '0:29.930', '0:30.080', 3),
+    (11, 'Tomás Costa', 5, '1:30.488', '0:30.620', '0:29.910', '0:29.958', 3),
+]
+
+DEMO_WEATHER = {
+    'air_temp_avg': 24.8,
+    'air_temp_min': 23.9,
+    'air_temp_max': 25.6,
+    'track_temp_avg': 31.5,
+    'track_temp_min': 30.7,
+    'track_temp_max': 32.2,
+    'humidity_avg': 41.2,
+    'pressure_avg': 1011.4,
+    'wind_speed_avg': 11.7,
+    'wind_dir_avg': 184.0,
+    'rainfall': False,
+}
+
+
+def seed_demo_race(conn, race_id):
+    cur = conn.cursor()
+    cur.execute("DELETE FROM race_results WHERE race_id = %s", (race_id,))
+    cur.execute("DELETE FROM laps WHERE race_id = %s", (race_id,))
+    cur.execute("DELETE FROM weather WHERE race_id = %s", (race_id,))
+
+    for result in DEMO_RESULTS:
+        cur.execute(
+            """INSERT INTO race_results
+               (race_id, driver_id, driver_name, team, position, points, fastest_lap, total_time, status)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (race_id, result['driver_id'], result['driver_name'], result['team'], result['position'], result['points'], result['fastest_lap'], result['total_time'], result['status'])
+        )
+
+    for driver_id, driver_name, lap_number, lap_time, sector1, sector2, sector3, position in DEMO_LAPS:
+        cur.execute(
+            """INSERT INTO laps
+               (race_id, driver_id, driver_name, lap_number, lap_time, sector1, sector2, sector3, position)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (race_id, driver_id, driver_name, lap_number, lap_time, sector1, sector2, sector3, position)
+        )
+
+    cur.execute(
+        """INSERT INTO weather
+           (race_id, air_temp_avg, air_temp_min, air_temp_max, track_temp_avg, track_temp_min, track_temp_max, humidity_avg, pressure_avg, wind_speed_avg, wind_dir_avg, rainfall)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           ON CONFLICT (race_id) DO UPDATE SET
+               air_temp_avg=EXCLUDED.air_temp_avg,
+               air_temp_min=EXCLUDED.air_temp_min,
+               air_temp_max=EXCLUDED.air_temp_max,
+               track_temp_avg=EXCLUDED.track_temp_avg,
+               track_temp_min=EXCLUDED.track_temp_min,
+               track_temp_max=EXCLUDED.track_temp_max,
+               humidity_avg=EXCLUDED.humidity_avg,
+               pressure_avg=EXCLUDED.pressure_avg,
+               wind_speed_avg=EXCLUDED.wind_speed_avg,
+               wind_dir_avg=EXCLUDED.wind_dir_avg,
+               rainfall=EXCLUDED.rainfall""",
+        (race_id, DEMO_WEATHER['air_temp_avg'], DEMO_WEATHER['air_temp_min'], DEMO_WEATHER['air_temp_max'], DEMO_WEATHER['track_temp_avg'], DEMO_WEATHER['track_temp_min'], DEMO_WEATHER['track_temp_max'], DEMO_WEATHER['humidity_avg'], DEMO_WEATHER['pressure_avg'], DEMO_WEATHER['wind_speed_avg'], DEMO_WEATHER['wind_dir_avg'], DEMO_WEATHER['rainfall'])
+    )
+
+    conn.commit()
+    cur.close()
+
+
+def import_fastf1_race(year, round_number, race_name_override=None, status='completed'):
+    """Importa uma corrida FastF1 para a base de dados e devolve os metadados."""
+    session = fastf1.get_session(year, round_number, 'R')
+    loaded = False
+    for load_args in [
+        {'laps': True, 'results': True, 'telemetry': False},
+        {'laps': True, 'results': True},
+        {},
+    ]:
+        try:
+            session.load(**load_args)
+            loaded = True
+            break
+        except Exception:
+            continue
+    if not loaded:
+        raise RuntimeError('Não foi possível carregar a sessão do FastF1')
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    event = session.event
+    race_name = race_name_override or str(event['EventName'])
+    circuit = str(event['Location'])
+    country = str(event['Country'])
+    race_date = str(event['EventDate'].date())
+    total_laps = int(session.laps['LapNumber'].max()) if not session.laps.empty else 50
+
+    cur.execute(
+        """INSERT INTO races (name, circuit, country, date, total_laps, status)
+           VALUES (%s, %s, %s, %s, %s, %s)
+           RETURNING race_id""",
+        (race_name, circuit, country, race_date, total_laps, status)
+    )
+    race_id = cur.fetchone()[0]
+
+    def safe_int(val, default=0):
+        try:
+            f = float(val)
+            return default if math.isnan(f) else int(f)
+        except Exception:
+            return default
+
+    def safe_str(val):
+        if val is None:
+            return None
+        s = str(val)
+        return None if s in ('', 'nan', 'NaT', 'None') else s
+
+    results_inserted = 0
+    if session.results is not None and not session.results.empty:
+        for _, driver_row in session.results.iterrows():
+            driver_id = safe_int(driver_row.get('DriverNumber'), 0)
+            driver_name = str(driver_row.get('FullName', 'Unknown'))
+            team = str(driver_row.get('TeamName', 'Unknown'))
+            position = safe_int(driver_row.get('Position'), 0)
+            points = safe_int(driver_row.get('Points'), 0)
+            status_value = 'finished' if driver_row.get('Status') == 'Finished' else 'dnf'
+            fastest_lap = safe_str(driver_row.get('FastestLapTime'))
+            total_time = safe_str(driver_row.get('Time'))
+
+            if driver_id == 0:
+                continue
+
+            cur.execute(
+                """INSERT INTO race_results
+                   (race_id, driver_id, driver_name, team, position, points, fastest_lap, total_time, status)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT DO NOTHING""",
+                (race_id, driver_id, driver_name, team, position, points, fastest_lap, total_time, status_value)
+            )
+            results_inserted += 1
+
+    laps_inserted = 0
+    if not session.laps.empty:
+        for _, lap_row in session.laps.iterrows():
+            driver_id = safe_int(lap_row.get('DriverNumber'), 0)
+            driver_name = str(lap_row.get('Driver', 'Unknown'))
+            lap_number = safe_int(lap_row.get('LapNumber'), 0)
+            lap_time = safe_str(lap_row.get('LapTime'))
+            sector1 = safe_str(lap_row.get('Sector1Time'))
+            sector2 = safe_str(lap_row.get('Sector2Time'))
+            sector3 = safe_str(lap_row.get('Sector3Time'))
+            position = safe_int(lap_row.get('Position'), None)
+
+            if not lap_time or driver_id == 0 or lap_number == 0:
+                continue
+
+            cur.execute(
+                """INSERT INTO laps
+                   (race_id, driver_id, driver_name, lap_number, lap_time, sector1, sector2, sector3, position)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (race_id, driver_id, lap_number) DO NOTHING""",
+                (race_id, driver_id, driver_name, lap_number, lap_time, sector1, sector2, sector3, position)
+            )
+            laps_inserted += 1
+
+    weather_inserted = False
+    try:
+        if hasattr(session, 'weather_data') and session.weather_data is not None and not session.weather_data.empty:
+            wd = session.weather_data
+
+            def sf(val):
+                try:
+                    f = float(val)
+                    return None if math.isnan(f) else f
+                except Exception:
+                    return None
+
+            cur.execute(
+                """INSERT INTO weather
+                   (race_id, air_temp_avg, air_temp_min, air_temp_max, track_temp_avg, track_temp_min, track_temp_max, humidity_avg, pressure_avg, wind_speed_avg, wind_dir_avg, rainfall)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (race_id) DO UPDATE SET
+                       air_temp_avg=EXCLUDED.air_temp_avg,
+                       track_temp_avg=EXCLUDED.track_temp_avg,
+                       rainfall=EXCLUDED.rainfall""",
+                (race_id, sf(wd['AirTemp'].mean()), sf(wd['AirTemp'].min()), sf(wd['AirTemp'].max()),
+                 sf(wd['TrackTemp'].mean()), sf(wd['TrackTemp'].min()), sf(wd['TrackTemp'].max()),
+                 sf(wd['Humidity'].mean()), sf(wd['Pressure'].mean()),
+                 sf(wd['WindSpeed'].mean()), sf(wd['WindDirection'].mean()),
+                 bool(wd['Rainfall'].any()))
+            )
+            weather_inserted = True
+    except Exception as we:
+        print(f"Erro meteorologia: {we}")
+
+    data_imported = False
+    perf_inserted = 0
+    stint_inserted = 0
+    try:
+        data_service_url = os.getenv('DATA_SERVICE', 'http://data-service:5003')
+        data_resp = requests.post(
+            f"{data_service_url}/data/import/fastf1",
+            json={"year": year, "round": round_number, "race_id": race_id},
+            timeout=120
+        )
+        if data_resp.ok:
+            data_payload = data_resp.json()
+            data_imported = True
+            perf_inserted = data_payload.get('perf_inserted', 0)
+            stint_inserted = data_payload.get('stint_inserted', 0)
+    except Exception as data_error:
+        print(f"Erro ao importar dados FastF1 para o data service: {data_error}")
+
+    conn.commit()
+
+    cur.execute(
+        "SELECT race_id, name, circuit, country, date, total_laps, status FROM races WHERE race_id = %s",
+        (race_id,)
+    )
+    race_row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    return {
+        "race_id": race_id,
+        "race": Race(*race_row).to_json() if race_row else None,
+        "results_inserted": results_inserted,
+        "laps_inserted": laps_inserted,
+        "weather_inserted": weather_inserted,
+        "data_imported": data_imported,
+        "perf_inserted": perf_inserted,
+        "stint_inserted": stint_inserted,
+    }
 
 
 
@@ -493,6 +751,110 @@ def create_race():
         return jsonify({"error": str(e)}), 500
 
 
+@results_blueprint.route('/races/demo', methods=['POST'])
+def create_demo_race():
+    """Cria ou reutiliza a corrida demo persistida na base de dados."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT race_id, name, circuit, country, date, total_laps, status FROM races WHERE name = %s ORDER BY created_at DESC LIMIT 1",
+            (DEMO_RACE_NAME,)
+        )
+        row = cur.fetchone()
+
+        if row:
+            cur.execute("SELECT COUNT(*) FROM race_results WHERE race_id = %s", (row[0],))
+            results_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM laps WHERE race_id = %s", (row[0],))
+            laps_count = cur.fetchone()[0]
+
+            race = Race(*row)
+            if results_count > 0 and laps_count > 0:
+                try:
+                    data_service_url = os.getenv('DATA_SERVICE', 'http://data-service:5003')
+                    requests.post(
+                        f"{data_service_url}/data/demo/seed",
+                        json={"race_id": race.race_id},
+                        timeout=10
+                    )
+                    # Depois de semear a demo, copia telemetria do piloto fonte (ex: Leclerc) para os outros
+                    try:
+                        requests.post(
+                            f"{data_service_url}/data/demo/copy-telemetry",
+                            json={"race_id": race.race_id},
+                            timeout=10
+                        )
+                    except Exception as copy_err:
+                        print(f"Erro ao copiar telemetria da demo: {copy_err}")
+                except Exception as seed_error:
+                    print(f"Erro ao preparar demo no data service: {seed_error}")
+
+                cur.close()
+                conn.close()
+                return jsonify({
+                    "created": False,
+                    "race_id": race.race_id,
+                    "race": race.to_json()
+                }), 200
+
+            race_id = race.race_id
+        else:
+            cur.execute(
+                """INSERT INTO races (name, circuit, country, date, total_laps, status)
+                   VALUES (%s, %s, %s, %s, %s, %s)
+                   RETURNING race_id""",
+                (DEMO_RACE_NAME, DEMO_RACE_CIRCUIT, DEMO_RACE_COUNTRY, DEMO_RACE_DATE, DEMO_RACE_TOTAL_LAPS, 'live')
+            )
+            race_id = cur.fetchone()[0]
+            conn.commit()
+
+        seed_demo_race(conn, race_id)
+
+        try:
+            data_service_url = os.getenv('DATA_SERVICE', 'http://data-service:5003')
+            requests.post(
+                f"{data_service_url}/data/demo/seed",
+                json={"race_id": race_id},
+                timeout=10
+            )
+            # Copiar telemetria do piloto fonte para os outros após semear
+            try:
+                requests.post(
+                    f"{data_service_url}/data/demo/copy-telemetry",
+                    json={"race_id": race_id},
+                    timeout=10
+                )
+            except Exception as copy_err:
+                print(f"Erro ao copiar telemetria da demo: {copy_err}")
+        except Exception as seed_error:
+            print(f"Erro ao preparar demo no data service: {seed_error}")
+
+        cur.execute(
+            "SELECT race_id, name, circuit, country, date, total_laps, status FROM races WHERE race_id = %s",
+            (race_id,)
+        )
+        seeded_row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "created": True,
+            "race_id": race_id,
+            "race": Race(*seeded_row).to_json() if seeded_row else None,
+            "results_inserted": len(DEMO_RESULTS),
+            "laps_inserted": len(DEMO_LAPS),
+            "weather_inserted": True,
+            "data_imported": True,
+            "perf_inserted": 3,
+            "stint_inserted": 6
+        }), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 
 @results_blueprint.route('/races/<int:race_id>/status', methods=['PUT'])
 def update_race_status(race_id):
@@ -903,179 +1265,16 @@ def get_calendar(year):
 
 @results_blueprint.route('/import/fastf1', methods=['POST'])
 def import_fastf1():
-    """
-    Importa dados históricos reais de uma corrida usando FastF1.
-    Body JSON: { "year": 2024, "round": 1 }
-    Exemplo: year=2024, round=1 → Grande Prémio do Bahrain 2024
-    """
+    """Importa dados históricos reais de uma corrida usando FastF1."""
     try:
-        data  = request.get_json()
-        year  = data.get('year', 2024)
+        data = request.get_json() or {}
+        year = data.get('year', 2024)
         round_number = data.get('round', 1)
 
-        session = fastf1.get_session(year, round_number, 'R')
-        loaded = False
-        for load_args in [
-            {'laps': True, 'results': True, 'telemetry': False},
-            {'laps': True, 'results': True},
-            {},
-        ]:
-            try:
-                session.load(**load_args)
-                loaded = True
-                break
-            except Exception:
-                continue
-        if not loaded:
-            return jsonify({'error': 'Não foi possível carregar a sessão do FastF1'}), 500
-
-        conn = get_db_connection()
-        cur  = conn.cursor()
-
-        # ── 1. Inserir a corrida ─────────────────────────────────────────────
-        event      = session.event
-        race_name  = str(event['EventName'])
-        circuit    = str(event['Location'])
-        country    = str(event['Country'])
-        race_date  = str(event['EventDate'].date())
-        total_laps = int(session.laps['LapNumber'].max()) if not session.laps.empty else 50
-
-        cur.execute(
-            """INSERT INTO races (name, circuit, country, date, total_laps, status)
-               VALUES (%s, %s, %s, %s, %s, 'completed')
-               ON CONFLICT DO NOTHING
-               RETURNING race_id""",
-            (race_name, circuit, country, race_date, total_laps)
-        )
-        row = cur.fetchone()
-        if not row:
-            # Já existia — vai buscar o id
-            cur.execute("SELECT race_id FROM races WHERE name=%s AND date=%s", (race_name, race_date))
-            row = cur.fetchone()
-        race_id = row[0]
-
-        import math
-        def safe_int(val, default=0):
-            try:
-                f = float(val)
-                return default if math.isnan(f) else int(f)
-            except (TypeError, ValueError):
-                return default 
-
-        def safe_str(val):
-            if val is None:
-                return None
-            s = str(val)
-            return None if s in ('', 'nan', 'NaT', 'None') else s
-
-        # ── 2. Inserir resultados finais ─────────────────────────────────────
-        results_inserted = 0
-        if session.results is not None and not session.results.empty:
-            for _, driver_row in session.results.iterrows():
-                driver_id   = safe_int(driver_row.get('DriverNumber'), 0)
-                driver_name = str(driver_row.get('FullName', 'Unknown'))
-                team        = str(driver_row.get('TeamName', 'Unknown'))
-                position    = safe_int(driver_row.get('Position'), 0)
-                points      = safe_int(driver_row.get('Points'), 0)
-                status      = 'finished' if driver_row.get('Status') == 'Finished' else 'dnf'
-                fastest_lap = safe_str(driver_row.get('FastestLapTime'))
-                total_time  = safe_str(driver_row.get('Time'))
-
-                if driver_id == 0:
-                    continue
-
-                cur.execute(
-                    """INSERT INTO race_results
-                       (race_id, driver_id, driver_name, team, position, points, fastest_lap, total_time, status)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                       ON CONFLICT DO NOTHING""",
-                    (race_id, driver_id, driver_name, team, position, points,
-                     fastest_lap, total_time, status)
-                )
-                results_inserted += 1
-
-        # ── 3. Inserir voltas ────────────────────────────────────────────────
-        laps_inserted = 0
-        if not session.laps.empty:
-            for _, lap_row in session.laps.iterrows():
-                driver_id   = safe_int(lap_row.get('DriverNumber'), 0)
-                driver_name = str(lap_row.get('Driver', 'Unknown'))
-                lap_number  = safe_int(lap_row.get('LapNumber'), 0)
-                lap_time    = safe_str(lap_row.get('LapTime'))
-                sector1     = safe_str(lap_row.get('Sector1Time'))
-                sector2     = safe_str(lap_row.get('Sector2Time'))
-                sector3     = safe_str(lap_row.get('Sector3Time'))
-                position    = safe_int(lap_row.get('Position'), None)
-
-                if not lap_time or driver_id == 0 or lap_number == 0:
-                    continue
-
-                cur.execute(
-                    """INSERT INTO laps
-                       (race_id, driver_id, driver_name, lap_number, lap_time, sector1, sector2, sector3, position)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                       ON CONFLICT (race_id, driver_id, lap_number) DO NOTHING""",
-                    (race_id, driver_id, driver_name, lap_number,
-                     lap_time, sector1, sector2, sector3, position)
-                )
-                laps_inserted += 1
-
-        # 4. Inserir meteorologia
-        weather_inserted = False
-        try:
-            if hasattr(session, 'weather_data') and session.weather_data is not None and not session.weather_data.empty:
-                wd = session.weather_data
-                import math
-                def sf(val):
-                    try:
-                        f = float(val)
-                        return None if math.isnan(f) else f
-                    except:
-                        return None
-                cur.execute(
-                    "INSERT INTO weather (race_id, air_temp_avg, air_temp_min, air_temp_max, track_temp_avg, track_temp_min, track_temp_max, humidity_avg, pressure_avg, wind_speed_avg, wind_dir_avg, rainfall) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (race_id) DO UPDATE SET air_temp_avg=EXCLUDED.air_temp_avg, track_temp_avg=EXCLUDED.track_temp_avg, rainfall=EXCLUDED.rainfall",
-                    (race_id, sf(wd['AirTemp'].mean()), sf(wd['AirTemp'].min()), sf(wd['AirTemp'].max()),
-                     sf(wd['TrackTemp'].mean()), sf(wd['TrackTemp'].min()), sf(wd['TrackTemp'].max()),
-                     sf(wd['Humidity'].mean()), sf(wd['Pressure'].mean()),
-                     sf(wd['WindSpeed'].mean()), sf(wd['WindDirection'].mean()),
-                     bool(wd['Rainfall'].any()))
-                )
-                weather_inserted = True
-        except Exception as we:
-            print(f"Erro meteorologia: {we}")
-
-        data_imported = False
-        perf_inserted = 0
-        stint_inserted = 0
-        try:
-            data_service_url = os.getenv('DATA_SERVICE', 'http://data-service:5003')
-            data_resp = requests.post(
-                f"{data_service_url}/data/import/fastf1",
-                json={"year": year, "round": round_number, "race_id": race_id},
-                timeout=120
-            )
-            if data_resp.ok:
-                data_payload = data_resp.json()
-                data_imported = True
-                perf_inserted = data_payload.get('perf_inserted', 0)
-                stint_inserted = data_payload.get('stint_inserted', 0)
-        except Exception as data_error:
-            print(f"Erro ao importar dados FastF1 para o data service: {data_error}")
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
+        payload = import_fastf1_race(year, round_number)
         return jsonify({
             "message": "FastF1 import complete",
-            "race_id": race_id,
-            "race_name": race_name,
-            "results_inserted": results_inserted,
-            "laps_inserted": laps_inserted,
-            "weather_inserted": weather_inserted,
-            "data_imported": data_imported,
-            "perf_inserted": perf_inserted,
-            "stint_inserted": stint_inserted
+            **payload
         }), 201
 
     except Exception as e:

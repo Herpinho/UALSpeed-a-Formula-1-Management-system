@@ -1057,13 +1057,32 @@
             races.forEach(r => {
                 const opt = document.createElement('option');
                 opt.value = r.race_id;
-                opt.text = `${r.name} (${r.status})`;
+                opt.text = r.name && r.name.toLowerCase().includes('demo')
+                    ? `${r.name} · DEMO (${r.status})`
+                    : `${r.name} (${r.status})`;
                 sel.appendChild(opt);
             });
+
+            const savedRaceId = localStorage.getItem('ualspeed_current_race_id');
+            if (savedRaceId && Array.from(sel.options).some(opt => opt.value === savedRaceId)) {
+                sel.value = savedRaceId;
+                if (currentRaceId !== savedRaceId) {
+                    await selectRace(savedRaceId);
+                }
+            }
         }
 
         async function selectRace(id) {
             currentRaceId = id || null;
+            const raceSelect = document.getElementById('race-select');
+            if (raceSelect) {
+                raceSelect.value = id || '';
+            }
+            if (id) {
+                localStorage.setItem('ualspeed_current_race_id', String(id));
+            } else {
+                localStorage.removeItem('ualspeed_current_race_id');
+            }
             if (!id) return;
 
             // Vai buscar detalhes da corrida (circuit, country, etc.)
@@ -1576,17 +1595,19 @@
         }
 
         async function openDemoRace() {
-            showPage('live');
-            await loadRaces();
-            const raceSelect = document.getElementById('race-select');
-            if (!raceSelect || raceSelect.options.length < 2) {
-                toast('Sem corridas disponíveis para demo', true);
+            const res = await apiFetch(`${API.results}/races/demo`, {
+                method: 'POST'
+            });
+
+            if (!res || !res.race_id) {
+                toast('Não foi possível preparar a corrida demo', true);
                 return;
             }
-            const firstRaceId = raceSelect.options[1].value;
-            raceSelect.value = firstRaceId;
-            await selectRace(firstRaceId);
-            toast('Corrida demo carregada');
+
+            showPage('live');
+            await loadRaces();
+            await selectRace(String(res.race_id));
+            toast(res.created ? 'Corrida demo criada e carregada' : 'Corrida demo carregada');
         }
 
         async function triggerDemoFailure() {
@@ -1690,11 +1711,11 @@
             }
         }
 
-        window.addEventListener('load', () => {
+        window.addEventListener('load', async () => {
             document.getElementById('import-modal').addEventListener('click', function(e) {
                 if (e.target === this) closeImportModal();
             });
-            loadRaces();
+            await loadRaces();
             metricsInterval = setInterval(() => {
                 const metricsPage = document.getElementById('page-metrics');
                 if (metricsPage.classList.contains('active')) loadMetrics();
