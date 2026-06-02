@@ -41,17 +41,33 @@ DEMO_CARS = [
 
 data_blueprint = Blueprint('data', __name__)
 
-DB_CONFIG = {
-    'host': os.getenv('DDB_HOST', 'postgres-data'),
-    'port': os.getenv('DDB_PORT', '5432'),
-    'database': os.getenv('DDB_NAME', 'ualspeed_data'),
-    'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', 'postgres')
-}
+DB_MASTER_HOST = os.getenv('DB_MASTER_HOST', 'postgres-data-master')
+DB_SLAVE_HOST  = os.getenv('DB_SLAVE_HOST', 'postgres-data-slave')
+DB_PORT        = os.getenv('DB_PORT', '5432')
+DB_NAME        = os.getenv('DB_NAME', 'ualspeed_data')
+DB_USER        = os.getenv('DB_USER', 'postgres')
+DB_PASSWORD    = os.getenv('DB_PASSWORD', 'postgres')
 
-def get_db_connection():
-    return psycopg2.connect(**DB_CONFIG)
-
+def get_write_connection():
+    return psycopg2.connect(
+        host=DB_MASTER_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
+def get_read_connection():
+    try:
+        return psycopg2.connect(
+            host=DB_SLAVE_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
+        )
+    except Exception as e:
+        print(f"error: {e}, using master for read")
+        return get_write_connection()
 
 def safe_float(val):
     try:
@@ -82,7 +98,7 @@ _demo_failure_until = 0.0
 def is_demo_failure_active():
     return time.time() < _demo_failure_until
 
-@data_blueprint.route('/', methods=['GET'])
+@data_blueprint.route('/health', methods=['GET'])
 def health_check():
     if is_demo_failure_active():
         return jsonify({
@@ -94,7 +110,7 @@ def health_check():
 
     try:
         start = time.time()
-        db = get_db_connection()
+        db = get_read_connection()
         db.close()
         db_ping = round((time.time() - start) * 1000, 2)
         db_status = 'running'
@@ -141,7 +157,7 @@ def seed_demo_metrics():
         if not race_id:
             return jsonify({'error': 'race_id é obrigatório'}), 400
 
-        db = get_db_connection()
+        db = get_write_connection()
         cur = db.cursor()
 
         cur.execute("DELETE FROM cars WHERE race_id = %s", (race_id,))
@@ -208,7 +224,7 @@ def copy_demo_telemetry():
         if not race_id:
             return jsonify({'error': 'race_id é obrigatório'}), 400
 
-        db = get_db_connection()
+        db = get_write_connection()
         cur = db.cursor()
 
         # Encontrar piloto fonte: procura por driver_name contendo 'leclerc' se source_driver_id não for fornecido
@@ -358,7 +374,7 @@ def stop_race(race_id):
 @data_blueprint.route('/cars/<race_id>', methods=['GET'])
 def get_cars(race_id):
     try:
-        db = get_db_connection()
+        db = get_read_connection()
         cursor = db.cursor()
 
         cursor.execute("""
@@ -424,7 +440,7 @@ def get_driver_names(race_id):
 def get_cars_latest(race_id):
     """Obtém o último estado de cada carro em pista"""
     try:
-        db = get_db_connection()
+        db =    get_read_connection()
         cursor = db.cursor()
 
         # Último registo por piloto
@@ -567,7 +583,7 @@ def simulate_race(race_id):
                 3: race_data[phase_size*2:]
             }
 
-        db = get_db_connection()
+        db = get_write_connection()
         cursor = db.cursor()
 
         cursor.execute("DELETE FROM cars WHERE race_id = %s", (race_id,))
@@ -629,7 +645,7 @@ def set_phase(race_id, phase):
         if phase not in [1, 2, 3]:
             return jsonify({'error': 'Fase inválida. Use 1, 2 ou 3'}), 400
 
-        db = get_db_connection()
+        db = get_write_connection()
         cursor = db.cursor()
 
         cursor.execute(
@@ -708,7 +724,7 @@ def import_fastf1():
         if not loaded:
             return jsonify({'error': 'Não foi possível carregar a sessão'}), 500
 
-        db = get_db_connection()
+        db = get_write_connection()
         cur = db.cursor()
 
         perf_inserted = 0
@@ -825,7 +841,7 @@ def import_fastf1():
 def get_race_performance(race_id):
     """Retorna performance de todos os pilotos de uma corrida"""
     try:
-        db = get_db_connection()
+        db = get_read_connection()
         cur = db.cursor()
         cur.execute("""
             SELECT perf_id, race_id, driver_id, driver_name,
@@ -846,7 +862,7 @@ def get_race_performance(race_id):
 def get_driver_performance(race_id, driver_id):
     """Retorna performance de um piloto específico"""
     try:
-        db = get_db_connection()
+        db = get_read_connection()
         cur = db.cursor()
         cur.execute("""
             SELECT perf_id, race_id, driver_id, driver_name,
@@ -868,7 +884,7 @@ def get_driver_performance(race_id, driver_id):
 def get_race_stints(race_id):
     """Retorna todos os stints de uma corrida"""
     try:
-        db = get_db_connection()
+        db = get_read_connection()
         cur = db.cursor()
         cur.execute("""
             SELECT stint_id, race_id, driver_id, driver_name,
@@ -889,7 +905,7 @@ def get_race_stints(race_id):
 def get_driver_stints(race_id, driver_id):
     """Retorna stints de um piloto específico"""
     try:
-        db = get_db_connection()
+        db = get_read_connection()
         cur = db.cursor()
         cur.execute("""
             SELECT stint_id, race_id, driver_id, driver_name,

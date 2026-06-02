@@ -9,6 +9,12 @@ services:
         mode: ingress
     networks:
     - ualspeed-overlay
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     deploy:
       replicas: 2
       placement:
@@ -16,8 +22,7 @@ services:
           - node.role == manager
       restart_policy:
         condition: on-failure
-        delay: 5s
-    
+        delay: 5s    
   results-service:
     image: ualspeed-results:latest
     ports:
@@ -30,11 +35,18 @@ services:
     depends_on:
       - postgres-results
     environment:
-      - DB_HOST=postgres-results
+      - DB_MASTER_HOST=postgres-results-master
+      - DB_SLAVE_HOST=postgres-results-slave
       - DB_PORT=5432
       - DB_NAME=${RESULTS_DB_NAME:-ualspeed_results}
       - DB_USER=${RESULTS_DB_USER:-postgres}
       - DB_PASSWORD=${RESULTS_DB_PASSWORD:-postgres}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     deploy:
       replicas: 2
       placement:
@@ -55,11 +67,18 @@ services:
     depends_on:
       - postgres-data
     environment:
-      - DB_HOST=postgres-data
+      - DB_MASTER_HOST=postgres-data-master
+      - DB_SLAVE_HOST=postgres-data-slave
       - DB_PORT=5432
       - DB_NAME=${DATA_DB_NAME:-ualspeed_data}
       - DB_USER=${DATA_DB_USER:-postgres}
       - DB_PASSWORD=${DATA_DB_PASSWORD:-postgres}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5003/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     deploy:
       replicas: 2
       placement:
@@ -78,13 +97,20 @@ services:
     networks:
       - ualspeed-overlay
     environment:
-      - MDB_HOST=ualspeed_postgres-metrics
+      - MDB_MASTER_HOST=postgres-metrics-master
+      - MDB_SLAVE_HOST=postgres-metrics-slave
       - MDB_PORT=5432
       - MDB_NAME=ualspeed_metrics
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - RESULTS_SERVICE=http://results-service:5002
       - DATA_SERVICE=http://data-service:5003
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     deploy:
       replicas: 2
       placement:
@@ -93,48 +119,22 @@ services:
       restart_policy:
         condition: on-failure
         delay: 10s
-  postgres-results:
+  postgres-metrics-master:
     image: postgres:15
-    environment:
-      POSTGRES_USER: ${RESULTS_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${RESULTS_DB_PASSWORD:-postgres}
-      POSTGRES_DB: ${RESULTS_DB_NAME:-ualspeed_results}
-    volumes:
-      - results_data:/var/lib/postgresql/data
-    networks:
-      - ualspeed-overlay
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: on-failure
-  postgres-data:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: ${DATA_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DATA_DB_PASSWORD:-postgres}
-      POSTGRES_DB: ${DATA_DB_NAME:-ualspeed_data}
-    volumes:
-      - data_data:/var/lib/postgresql/data
-    networks:
-      - ualspeed-overlay
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: on-failure
-  postgres-metrics:
-    image: postgres:15
+    command: >
+      postgres
+      -c wal_level=replica 
+      -c max_wal_senders=5 
+      -c max_replcation_slots=5 
+      -c hot_standby=on
+      -c synchronous_commit=on
+      -c synchronous_standby_names='*'
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: ualspeed_metrics
     volumes:
-      - metrics_data:/var/lib/postgresql/data
+      - metrics_master_data:/var/lib/postgresql/data
     networks:
       - ualspeed-overlay
     deploy:
@@ -142,14 +142,122 @@ services:
       placement:
         constraints:
           - node.role == manager
-      restart_policy:
-        condition: on-failure
+  postgres-metrics-slave:
+    image: postgres:15
+    command: >
+      bash -c "
+      until pg_isready -h postgres-metrics-master -p 5432; do
+        echo 'Waiting for master to be ready...';
+        sleep 2;
+      done;
+      if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+        echo 'Booting replica...';
+        pg_basebackup -h postgres-metrics-master -D /var/lib/postgresql/data -U $${DB_USER:-postgres} -v -P -R --wal-method=stream;
+      fi;
+      exec postgres"
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ualspeed_metrics
+    volumes:
+      - metrics_slave_data:/var/lib/postgresql/data
+    networks:
+      - ualspeed-overlay
+    deploy:
+      replicas: 1
+  postgres-results-master:
+    image: postgres:15
+    command: >
+      postgres
+      -c wal_level=replica 
+      -c max_wal_senders=5 
+      -c max_replcation_slots=5 
+      -c hot_standby=on
+    environment:
+      POSTGRES_USER: ${RESULTS_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${RESULTS_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${RESULTS_DB_NAME:-ualspeed_results}
+    volumes:
+      - results_master_data:/var/lib/postgresql/data
+    networks:
+      - ualspeed-overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+  postgres-results-slave:
+    image: postgres:15
+    command: >
+      bash -c "
+      until pg_isready -h postgres-results-master -p 5432; do
+        echo 'Waiting for master to be ready...';
+        sleep 2;
+      done;
+      if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+        echo 'Booting replica...';
+        pg_basebackup -h postgres-results-master -D /var/lib/postgresql/data -U $${RESULTS_DB_USER:-postgres} -v -P -R --wal-method=stream;
+      fi;
+      exec postgres"
+    environment:
+      POSTGRES_USER: ${RESULTS_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${RESULTS_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${RESULTS_DB_NAME:-ualspeed_results}
+    volumes:
+      - results_slave_data:/var/lib/postgresql/data 
+    networks:
+      - ualspeed-overlay
+    deploy:
+      replicas: 1
+  postgres-data-master:
+    image: postgres:15
+    command: >
+      postgres
+      -c wal_level=replica 
+      -c max_wal_senders=5 
+      -c max_replcation_slots=5 
+      -c hot_standby=on
+    environment:
+      POSTGRES_USER: ${DATA_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DATA_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DATA_DB_NAME:-ualspeed_data}
+    volumes:
+      - data_master_data:/var/lib/postgresql/data
+    networks:
+      - ualspeed-overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+  postgres-data-slave:
+    image: postgres:15
+    command: >
+      bash -c "
+      until pg_isready -h postgres-data-master -p 5432; do
+        echo 'Waiting for master to be ready...';
+        sleep 2;
+      done;
+      if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+        echo 'Booting replica...';
+        pg_basebackup -h postgres-data-master -D /var/lib/postgresql/data -U $${DATA_DB_USER:-postgres} -v -P -R --wal-method=stream;
+      fi;
+      exec postgres"
+    environment:
+      POSTGRES_USER: ${DATA_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DATA_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DATA_DB_NAME:-ualspeed_data}
+    volumes:
+      - data_slave_data:/var/lib/postgresql/data  
 networks:
   ualspeed-overlay:
     driver: overlay
     attachable: true
 volumes:
-  results_data:
-  data_data:
-  metrics_data:
+  metrics_master_data:
+  metrics_slave_data:
+  results_master_data:
+  results_slave_data:
+  data_master_data:
+  data_slave_data:
 

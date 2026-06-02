@@ -9,13 +9,12 @@ from model import Service, ServiceCheck
 
 metrics_blueprint = Blueprint('metrics', __name__)
 
-DB_CONFIG = {
-    'host':     os.getenv('MDB_HOST', 'postgres-metrics'),
-    'port':     os.getenv('MDB_PORT', '5432'),
-    'database': os.getenv('MDB_NAME', 'ualspeed_metrics'),
-    'user':     os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', 'postgres')
-}
+DB_MASTER_HOST = os.getenv('MDB_MASTER_HOST', 'postgres-metrics-master')
+DB_SLAVE_HOST  = os.getenv('MDB_SLAVE_HOST', 'postgres-metrics-slave')
+DB_PORT        = os.getenv('MDB_PORT', '5432')
+DB_NAME        = os.getenv('MDB_NAME', 'ualspeed_metrics')
+DB_USER        = os.getenv('DB_USER', 'postgres')
+DB_PASSWORD    = os.getenv('DB_PASSWORD', 'postgres')
 
 CHECK_INTERVAL   = int(os.getenv('CHECK_INTERVAL', 30))   # segundos entre checks
 LATENCY_WARN_MS  = float(os.getenv('LATENCY_WARN_MS', 500))  # acima disto -> degraded
@@ -24,9 +23,32 @@ REQUEST_TIMEOUT  = float(os.getenv('REQUEST_TIMEOUT', 5))
 ERROR_RESPONSE = {'error': 'Error getting data, retry or contact support if problem persists.'}
 
 
-def get_db_connection():
-    return psycopg2.connect(**DB_CONFIG)
-
+def get_write_connection():
+    return psycopg2.connect(
+        host=DB_MASTER_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
+def get_read_connection():
+    try:
+        return psycopg2.connect(
+            host=DB_SLAVE_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
+        )
+    except Exception as e:
+        print(f"error:{e}, falling back to master for reads")
+        return psycopg2.connect(
+            host=DB_MASTER_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
+        )
 
 # ---------------------------------------------------------------------------
 # Lógica de check de um serviço
@@ -62,11 +84,16 @@ def check_service(url: str) -> dict:
 def run_all_checks():
     """Faz check a todos os serviços registados e guarda na BD."""
     try:
-        db = get_db_connection()
+        db = get_read_connection()
         cursor = db.cursor()
 
         cursor.execute("SELECT service_id, name, url FROM services")
         services = cursor.fetchall()
+        cursor.close()
+        db.close()
+        db = get_write_connection()
+        cursor = db.cursor()
+        
 
         for service_id, name, url in services:
             result = check_service(url)
@@ -117,11 +144,11 @@ def start_background_checker():
 # Rotas
 # ---------------------------------------------------------------------------
 
-@metrics_blueprint.route('/', methods=['GET'])
+@metrics_blueprint.route('/health', methods=['GET'])
 def health_check():
     try:
         start = time.time()
-        db = get_db_connection()
+        db = get_read_connection()
         db.close()
         db_ping = round((time.time() - start) * 1000, 2)
         db_status = 'running'
@@ -142,7 +169,7 @@ def health_check():
 def get_services_status():
     """Estado atual de cada serviço (último check de cada um)."""
     try:
-        db = get_db_connection()
+        db = get_read_connection()
         cursor = db.cursor()
 
         cursor.execute("""
@@ -198,7 +225,7 @@ def get_latency_history():
         hours = request.args.get('hours', 1, type=int)
         service_id = request.args.get('service_id', type=int)
 
-        db = get_db_connection()
+        db = get_read_connection()
         cursor = db.cursor()
 
         query = """
@@ -254,7 +281,7 @@ def register_service():
         if not name or not url:
             return jsonify({'error': 'name e url são obrigatórios'}), 400
 
-        db = get_db_connection()
+        db = get_write_connection()
         cursor = db.cursor()
         cursor.execute(
             "INSERT INTO services (name, url) VALUES (%s, %s) RETURNING service_id",
@@ -277,7 +304,7 @@ def register_service():
 def delete_service(service_id):
     """Remove um serviço da monitorização."""
     try:
-        db = get_db_connection()
+        db = get_write_connection()
         cursor = db.cursor()
         cursor.execute("DELETE FROM services WHERE service_id = %s", (service_id,))
         db.commit()
@@ -299,7 +326,7 @@ def status_summary():
     }
     """
     try:
-        db = get_db_connection()
+        db = get_read_connection()
         cursor = db.cursor()
 
         # For each service get the latest check (if any)
@@ -366,7 +393,7 @@ def post_event():
         service_id = body.get('service_id')
         event_type = body.get('event_type', 'generic')
 
-        db = get_db_connection()
+        db = get_write_connection()
         cursor = db.cursor()
         cursor.execute(
             "INSERT INTO events (service_id, event_type) VALUES (%s, %s)",
@@ -392,7 +419,7 @@ def post_events_bulk():
 
         rows = [(service_id, event_type)] * count
 
-        db = get_db_connection()
+        db = get_write_connection()
         cursor = db.cursor()
         psycopg2.extras.execute_values(
             cursor,
@@ -423,7 +450,7 @@ def get_throughput():
     try:
         minutes = request.args.get('minutes', 10, type=int)
 
-        db = get_db_connection()
+        db = get_read_connection()
         cursor = db.cursor()
 
         cursor.execute(

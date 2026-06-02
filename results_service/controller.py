@@ -8,17 +8,34 @@ from model import Race, RaceResult, Lap, Standing, Driver, Team
 
 results_blueprint = Blueprint('results', __name__)
 
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', '5432'),
-    'database': os.getenv('DB_NAME', 'ualspeed'),
-    'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', 'postgres')
-}
+DB_MASTER_HOST = os.getenv('DB_MASTER_HOST', 'postgres-results-master')
+DB_SLAVE_HOST  = os.getenv('DB_SLAVE_HOST', 'postgres-results-slave')
+DB_PORT        = os.getenv('DB_PORT', '5432')
+DB_NAME        = os.getenv('DB_NAME', 'ualspeed_results')
+DB_USER        = os.getenv('DB_USER', 'postgres')
+DB_PASSWORD    = os.getenv('DB_PASSWORD', 'postgres')
 
-def get_db_connection():
-    """Cria conexão com a base de dados"""
-    return psycopg2.connect(**DB_CONFIG)
+def get_write_connection():
+    return psycopg2.connect(
+        host=DB_MASTER_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
+def get_read_connection():
+    try: 
+        return psycopg2.connect(
+            host=DB_SLAVE_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            connect_timeout=2
+        )
+    except Exception as e:
+        print(f"error: {e}, falling back to master")
+        return get_write_connection()
 
 
 DEMO_RACE_NAME = os.getenv('DEMO_RACE_NAME', 'UALSpeed Demo Race')
@@ -113,7 +130,7 @@ def seed_demo_race(conn, race_id):
 
 def import_fastf1_race(year, round_number, race_name_override=None, status='completed'):
     """Importa uma corrida FastF1 para a base de dados e devolve os metadados."""
-    conn = get_db_connection()
+    conn = get_read_connection()
     cur = conn.cursor()
     
     # Verificar se a corrida já existe
@@ -122,10 +139,9 @@ def import_fastf1_race(year, round_number, race_name_override=None, status='comp
         (year, round_number)
     )
     existing_race = cur.fetchone()
-    
+    cur.close()
+    conn.close()
     if existing_race:
-        cur.close()
-        conn.close()
         return {
             "race_id": existing_race[0],
             "race": Race(existing_race[0], existing_race[1], existing_race[2], existing_race[3], existing_race[4], existing_race[5], existing_race[6], existing_race[7], existing_race[8]).to_json(),
@@ -160,7 +176,8 @@ def import_fastf1_race(year, round_number, race_name_override=None, status='comp
     country = str(event['Country'])
     race_date = str(event['EventDate'].date())
     total_laps = int(session.laps['LapNumber'].max()) if not session.laps.empty else 50
-
+    conn = get_write_connection()
+    cur = conn.cursor()
     cur.execute(
         """INSERT INTO races (name, circuit, country, date, total_laps, round, year, status)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -320,7 +337,7 @@ def import_fastf1_race(year, round_number, race_name_override=None, status='comp
 
 
 
-@results_blueprint.route('/', methods=['GET'])
+@results_blueprint.route('/health', methods=['GET'])
 def health_check():
     """Health check do serviço"""
     return jsonify({
@@ -336,7 +353,7 @@ def health_check():
 def get_teams():
     """Obter todas as equipas"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur  = conn.cursor()
 
         cur.execute("SELECT team_id, name, nationality, car_model FROM teams ORDER BY name")
@@ -356,7 +373,7 @@ def get_teams():
 def get_team(team_id):
     """Obter detalhes de uma equipa"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur  = conn.cursor()
 
         cur.execute("SELECT team_id, name, nationality, car_model FROM teams WHERE team_id = %s", (team_id,))
@@ -379,7 +396,7 @@ def create_team():
     try:
         data = request.get_json()
 
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur  = conn.cursor()
 
         cur.execute(
@@ -405,7 +422,7 @@ def update_team(team_id):
     try:
         data = request.get_json()
 
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur  = conn.cursor()
 
         cur.execute(
@@ -430,7 +447,7 @@ def update_team(team_id):
 def get_drivers():
     """Obter todos os pilotos"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur  = conn.cursor()
 
         cur.execute("""
@@ -455,7 +472,7 @@ def get_drivers():
 def get_driver(driver_id):
     """Obter detalhes de um piloto"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur  = conn.cursor()
 
         cur.execute("""
@@ -483,7 +500,7 @@ def create_driver():
     try:
         data = request.get_json()
 
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur  = conn.cursor()
 
         cur.execute(
@@ -509,7 +526,7 @@ def update_driver(driver_id):
     try:
         data = request.get_json()
 
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur  = conn.cursor()
 
         cur.execute(
@@ -533,7 +550,7 @@ def update_driver(driver_id):
 def get_races():
     """Obter todas as corridas"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur = conn.cursor()
         
         status = request.args.get('status')  
@@ -568,7 +585,7 @@ def get_races():
 def get_race(race_id):
     """Obter detalhes de uma corrida específica"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -597,7 +614,7 @@ def get_race(race_id):
 def get_classification(race_id):
     """Obter classificação atual de uma corrida (resultados ordenados por posição)"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur = conn.cursor()
 
         top_speeds = {}
@@ -771,7 +788,7 @@ def create_race():
     try:
         data = request.get_json()
         
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -795,7 +812,7 @@ def create_race():
 def delete_race(race_id):
     """Eliminar uma corrida e todos os seus dados associados"""
     try:
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur = conn.cursor()
 
         # Eliminar dados dependentes primeiro para respeitar a integridade referencial
@@ -824,7 +841,7 @@ def delete_multiple_races():
         if not race_ids:
             return jsonify({"message": "Nenhuma corrida selecionada"}), 200
 
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur = conn.cursor()
         ids_tuple = tuple(race_ids)
 
@@ -846,7 +863,7 @@ def delete_multiple_races():
 def create_demo_race():
     """Cria ou reutiliza a corrida demo persistida na base de dados."""
     try:
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur = conn.cursor()
 
         cur.execute(
@@ -954,7 +971,7 @@ def update_race_status(race_id):
         data = request.get_json()
         status = data.get('status')
 
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur = conn.cursor()
 
         cur.execute(
@@ -977,7 +994,7 @@ def update_race(race_id):
     try:
         data = request.get_json()
         
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -1002,7 +1019,7 @@ def update_race(race_id):
 def get_current_race():
     """Obter corrida atual (status = live)"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -1041,7 +1058,7 @@ def get_current_race():
 def get_race_results(race_id):
     """Obter resultados de uma corrida"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -1073,7 +1090,7 @@ def create_race_result(race_id):
     try:
         data = request.get_json()
         
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -1101,7 +1118,7 @@ def create_race_result(race_id):
 def get_race_laps(race_id):
     """Obter todas as voltas de uma corrida"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur = conn.cursor()
         
         driver_id = request.args.get('driver_id')  
@@ -1143,7 +1160,7 @@ def create_lap(race_id):
     try:
         data = request.get_json()
         
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -1177,7 +1194,7 @@ def create_lap(race_id):
 def get_fastest_lap(race_id):
     """Obter a volta mais rápida de uma corrida"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -1209,7 +1226,7 @@ def get_fastest_lap(race_id):
 def get_standings():
     """Obter classificação geral dos pilotos"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -1238,7 +1255,7 @@ def get_standings():
 def get_driver_standing(driver_id):
     """Obter classificação de um piloto específico"""
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -1270,7 +1287,7 @@ def update_standings():
     try:
         data = request.get_json()
         
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -1316,7 +1333,7 @@ fastf1.Cache.enable_cache(CACHE_DIR)
 @results_blueprint.route('/weather/<int:race_id>', methods=['GET'])
 def get_weather(race_id):
     try:
-        conn = get_db_connection()
+        conn = get_read_connection()
         cur  = conn.cursor()
         cur.execute("SELECT air_temp_avg, air_temp_min, air_temp_max, track_temp_avg, track_temp_min, track_temp_max, humidity_avg, pressure_avg, wind_speed_avg, wind_dir_avg, rainfall FROM weather WHERE race_id = %s", (race_id,))
         row = cur.fetchone()
@@ -1386,7 +1403,7 @@ def import_fastf1_standings():
 
         driver_points = {}  
 
-        conn = get_db_connection()
+        conn = get_write_connection()
         cur  = conn.cursor()
 
         cur.execute("""
