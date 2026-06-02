@@ -9,12 +9,6 @@ services:
         mode: ingress
     networks:
     - ualspeed-overlay
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
     deploy:
       replicas: 2
       placement:
@@ -42,7 +36,7 @@ services:
       - DB_USER=${RESULTS_DB_USER:-postgres}
       - DB_PASSWORD=${RESULTS_DB_PASSWORD:-postgres}
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5002/health"]
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:5002/results/health"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -73,8 +67,10 @@ services:
       - DB_NAME=${DATA_DB_NAME:-ualspeed_data}
       - DB_USER=${DATA_DB_USER:-postgres}
       - DB_PASSWORD=${DATA_DB_PASSWORD:-postgres}
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5003/health"]
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:5003/data/health"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -106,7 +102,7 @@ services:
       - RESULTS_SERVICE=http://results-service:5002
       - DATA_SERVICE=http://data-service:5003
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5004/health"]
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:5004/metrics/health"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -125,7 +121,7 @@ services:
       postgres
       -c wal_level=replica 
       -c max_wal_senders=5 
-      -c max_replcation_slots=5 
+      -c max_replication_slots=5 
       -c hot_standby=on
       -c synchronous_commit=on
       -c synchronous_standby_names='*'
@@ -133,6 +129,7 @@ services:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: ualspeed_metrics
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - metrics_master_data:/var/lib/postgresql/data
     networks:
@@ -146,19 +143,16 @@ services:
     image: postgres:15
     command: >
       bash -c "
-      until pg_isready -h postgres-metrics-master -p 5432; do
-        echo 'Waiting for master to be ready...';
-        sleep 2;
-      done;
+      until pg_isready -h postgres-metrics-master -p 5432; do sleep 2; done;
       if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
-        echo 'Booting replica...';
-        pg_basebackup -h postgres-metrics-master -D /var/lib/postgresql/data -U $${DB_USER:-postgres} -v -P -R --wal-method=stream;
+        pg_basebackup -h postgres-metrics-master -D /var/lib/postgresql/data -U postgres -R
       fi;
-      exec postgres"
+      docker-entrypoint.sh postgres -c hot_standby=on"
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: ualspeed_metrics
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - metrics_slave_data:/var/lib/postgresql/data
     networks:
@@ -171,12 +165,13 @@ services:
       postgres
       -c wal_level=replica 
       -c max_wal_senders=5 
-      -c max_replcation_slots=5 
+      -c max_replication_slots=5 
       -c hot_standby=on
     environment:
       POSTGRES_USER: ${RESULTS_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${RESULTS_DB_PASSWORD:-postgres}
       POSTGRES_DB: ${RESULTS_DB_NAME:-ualspeed_results}
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - results_master_data:/var/lib/postgresql/data
     networks:
@@ -190,19 +185,16 @@ services:
     image: postgres:15
     command: >
       bash -c "
-      until pg_isready -h postgres-results-master -p 5432; do
-        echo 'Waiting for master to be ready...';
-        sleep 2;
-      done;
+      until pg_isready -h postgres-results-master -p 5432; do sleep 2; done;
       if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
-        echo 'Booting replica...';
-        pg_basebackup -h postgres-results-master -D /var/lib/postgresql/data -U $${RESULTS_DB_USER:-postgres} -v -P -R --wal-method=stream;
+        pg_basebackup -h postgres-results-master -D /var/lib/postgresql/data -U postgres -R
       fi;
-      exec postgres"
+      docker-entrypoint.sh postgres -c hot_standby=on"
     environment:
       POSTGRES_USER: ${RESULTS_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${RESULTS_DB_PASSWORD:-postgres}
       POSTGRES_DB: ${RESULTS_DB_NAME:-ualspeed_results}
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - results_slave_data:/var/lib/postgresql/data 
     networks:
@@ -215,7 +207,7 @@ services:
       postgres
       -c wal_level=replica 
       -c max_wal_senders=5 
-      -c max_replcation_slots=5 
+      -c max_replication_slots=5 
       -c hot_standby=on
     environment:
       POSTGRES_USER: ${DATA_DB_USER:-postgres}
@@ -234,19 +226,16 @@ services:
     image: postgres:15
     command: >
       bash -c "
-      until pg_isready -h postgres-data-master -p 5432; do
-        echo 'Waiting for master to be ready...';
-        sleep 2;
-      done;
+      until pg_isready -h postgres-data-master -p 5432; do sleep 2; done;
       if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
-        echo 'Booting replica...';
-        pg_basebackup -h postgres-data-master -D /var/lib/postgresql/data -U $${DATA_DB_USER:-postgres} -v -P -R --wal-method=stream;
+        pg_basebackup -h postgres-data-master -D /var/lib/postgresql/data -U postgres -R
       fi;
-      exec postgres"
+      docker-entrypoint.sh postgres -c hot_standby=on"
     environment:
       POSTGRES_USER: ${DATA_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DATA_DB_PASSWORD:-postgres}
       POSTGRES_DB: ${DATA_DB_NAME:-ualspeed_data}
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - data_slave_data:/var/lib/postgresql/data  
 networks:

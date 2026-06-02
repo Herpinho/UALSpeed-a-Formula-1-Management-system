@@ -1,0 +1,18 @@
+# Iniciar o swarm n
+docker swarm init
+
+cd [project_files]
+# criar ou dar update a cada service
+docker build -t ualspeed-frontend:latest ./frontend
+
+docker build -t ualspeed-results:latest results_service/
+
+docker build -t ualspeed-data:latest data_service/
+
+docker build -t ualspeed-metrics:latest metrics_service/
+
+# Deploy ou update no swarm
+docker stack deploy -c docker-stack.yml ualspeed
+
+# checkar nodes do swarm
+docker stack services ualspeed

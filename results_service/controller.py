@@ -1,3 +1,5 @@
+import time
+
 from flask import Blueprint, request, jsonify
 import psycopg2
 import os
@@ -609,10 +611,14 @@ def get_race(race_id):
         return jsonify({"error": str(e)}), 500
 
 
-
+_classification_cache = {} #race_id -> {timestamp, data}
+CACHE_TTL = 10 #time to live
 @results_blueprint.route('/classification/<int:race_id>', methods=['GET'])
 def get_classification(race_id):
-    """Obter classificação atual de uma corrida (resultados ordenados por posição)"""
+    if race_id in _classification_cache:
+        ts, cached = _classification_cache[race_id]
+        if time.time() - ts < CACHE_TTL:
+            return jsonify(cached), 200
     try:
         conn = get_read_connection()
         cur = conn.cursor()
@@ -738,11 +744,16 @@ def get_classification(race_id):
                 })
             cur.close()
             conn.close()
-            return jsonify({
+            result = {
                 "race_id": race_id,
                 "source": "results",
                 "classification": classification
-            }), 200
+            }
+            _classification_cache[race_id] = (time.time(), result)
+            cur.close()
+            conn.close()
+            return jsonify(result), 200
+
 
         # Se não houver resultados finais, usa as voltas
         cur.execute("""
@@ -771,12 +782,15 @@ def get_classification(race_id):
                 "position":    i + 1,
                 "top_speed":   top_speeds.get(driver_id, 0)
             })
-
-        return jsonify({
+        result = {
             "race_id": race_id,
             "source": "laps",
             "classification": classification
-        }), 200
+        }
+        _classification_cache[race_id] = (time.time(), result)
+        cur.close()
+        conn.close()
+        return jsonify(result), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -822,11 +836,10 @@ def delete_race(race_id):
         
         # Finalmente, eliminar a corrida
         cur.execute("DELETE FROM races WHERE race_id = %s", (race_id,))
-
+        _classification_cache.pop(race_id, None)
         conn.commit()
         cur.close()
         conn.close()
-
         return jsonify({"message": f"Corrida {race_id} eliminada com sucesso"}), 200
 
     except Exception as e:
@@ -854,6 +867,8 @@ def delete_multiple_races():
         conn.commit()
         cur.close()
         conn.close()
+        for raceid in race_ids:
+            _classification_cache.pop(raceid, None)
         return jsonify({"message": f"{len(race_ids)} corrida(s) eliminada(s) com sucesso"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
