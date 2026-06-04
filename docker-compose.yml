@@ -26,12 +26,14 @@ services:
       - DB_NAME=${RESULTS_DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=postgres-results
+      - DB_MASTER_HOST=postgres-results
+      - DB_SLAVE_HOST=postgres-results
       - DB_PORT=${DB_PORT}
       - RESULTS_SERVICE=${RESULTS_SERVICE}
       - DATA_SERVICE=${DATA_SERVICE}
     networks:
       - ualspeed-net
+    restart: unless-stopped
 
   postgres-results:
     image: postgres:15
@@ -62,12 +64,14 @@ services:
       - DB_NAME=${DDB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=postgres-data
+      - DB_MASTER_HOST=postgres-data
+      - DB_SLAVE_HOST=postgres-data
       - DB_PORT=${DB_PORT}
       - DATA_SERVICE=${DATA_SERVICE}
       - RESULTS_SERVICE=${RESULTS_SERVICE}
     networks:
       - ualspeed-net
+    restart: unless-stopped
 
   metrics-service:
     container_name: metrics-service
@@ -82,7 +86,8 @@ services:
       - MDB_NAME=${METRICS_POSTGRES_DB}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      - MDB_HOST=postgres-metrics
+      - MDB_MASTER_HOST=postgres-metrics
+      - MDB_SLAVE_HOST=postgres-metrics
       - MDB_PORT=${DB_PORT}
     networks:
       - ualspeed-net
