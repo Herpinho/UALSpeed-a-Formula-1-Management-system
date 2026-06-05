@@ -2,55 +2,155 @@ version: '3.8'
 
 services:
 
+  # ── REDIS (coordenação do cluster) 
+  redis:
+    image: redis:7-alpine
+    container_name: ualspeed-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - ualspeed-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── NÓ MANAGER 
+  manager:
+    build: ./clusters/cluster-ualspeed/node-manager
+    container_name: ualspeed-manager
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - WORKER_1_URL=http://worker-1:8001
+      - WORKER_2_URL=http://worker-2:8002
+      - SERVICO_DADOS_URL=http://data-service:5003
+      - SERVICO_RESULTADOS_URL=http://results-service:5002
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - fastf1-cache:/tmp/fastf1_cache
+    networks:
+      - ualspeed-net
+    restart: unless-stopped
+
+  # ── WORKER 1 
+  worker-1:
+    build: ./clusters/cluster-ualspeed/node-worker-1
+    container_name: ualspeed-worker-1
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MANAGER_URL=http://manager:8000
+      - WORKER_NOME=worker-1
+      - WORKER_URL=http://worker-1:8001
+    depends_on:
+      - manager
+    volumes:
+      - fastf1-cache:/tmp/fastf1_cache
+    networks:
+      - ualspeed-net
+    restart: unless-stopped
+
+  # ── WORKER 2 ─
+  worker-2:
+    build: ./clusters/cluster-ualspeed/node-worker-2
+    container_name: ualspeed-worker-2
+    ports:
+      - "8002:8002"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MANAGER_URL=http://manager:8000
+      - WORKER_NOME=worker-2
+      - WORKER_URL=http://worker-2:8002
+    depends_on:
+      - manager
+    volumes:
+      - fastf1-cache:/tmp/fastf1_cache
+    networks:
+      - ualspeed-net
+    restart: unless-stopped
+
+  # ── FRONTEND 
   frontend:
     container_name: ualspeed-frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "8080:3000"  
+      - "8080:3000"
     networks:
       - ualspeed-net
     restart: unless-stopped
-    
+
+  # ── RESULTS SERVICE 
   results-service:
     container_name: results-service
-    build: 
+    build:
       context: ./results_service
       dockerfile: Dockerfile
     ports:
       - "5002:5002"
     depends_on:
-      - postgres-results
+      - postgres-results-master
+      - postgres-results-slave
     environment:
-      - DB_NAME=${RESULTS_DB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_MASTER_HOST=postgres-results
-      - DB_SLAVE_HOST=postgres-results
-      - DB_PORT=${DB_PORT}
-      - RESULTS_SERVICE=${RESULTS_SERVICE}
-      - DATA_SERVICE=${DATA_SERVICE}
+      - DB_NAME=results_db
+      - DB_MASTER_HOST=postgres-results-master
+      - DB_SLAVE_HOST=postgres-results-slave
+      - DB_USER=ualspeed
+      - DB_PASSWORD=ualspeed123
+      - DB_PORT=5432
+      - RESULTS_SERVICE=http://results-service:5002
+      - DATA_SERVICE=http://data-service:5003
+      - DB_SLAVE_HOST=postgres-results-master
     networks:
       - ualspeed-net
     restart: unless-stopped
 
-  postgres-results:
+  postgres-results-master:
     image: postgres:15
-    container_name: postgres-results
+    container_name: postgres-results-master
     volumes:
       - ./results_service/schema.sql:/docker-entrypoint-initdb.d/schema.sql
-      - results_data:/var/lib/postgresql/data
+      - results_master:/var/lib/postgresql/data
     restart: always
     environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${RESULTS_POSTGRES_DB}
+      POSTGRES_USER: ualspeed
+      POSTGRES_PASSWORD: ualspeed123
+      POSTGRES_DB: results_db
     ports:
-      - "5433:5432"
+      - "5450:5432"
     networks:
       - ualspeed-net
 
+  postgres-results-slave:
+    image: postgres:15
+    container_name: postgres-results-slave
+    volumes:
+      - ./results_service/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - results_slave:/var/lib/postgresql/data
+    restart: always
+    environment:
+      POSTGRES_USER: ualspeed
+      POSTGRES_PASSWORD: ualspeed123
+      POSTGRES_DB: results_db
+    ports:
+      - "5451:5432"
+    networks:
+      - ualspeed-net
+
+  # ── DATA SERVICE
   data-service:
     container_name: data-service
     build:
@@ -59,20 +159,23 @@ services:
     ports:
       - "5003:5003"
     depends_on:
-      - postgres-data
+      - postgres-data-master
+      - postgres-data-slave
     environment:
-      - DB_NAME=${DDB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_MASTER_HOST=postgres-data
-      - DB_SLAVE_HOST=postgres-data
-      - DB_PORT=${DB_PORT}
-      - DATA_SERVICE=${DATA_SERVICE}
-      - RESULTS_SERVICE=${RESULTS_SERVICE}
+      - DB_NAME=data_db
+      - DB_MASTER_HOST=postgres-data-master
+      - DB_SLAVE_HOST=postgres-data-slave
+      - DB_USER=ualspeed
+      - DB_PASSWORD=ualspeed123
+      - DB_PORT=5432
+      - DATA_SERVICE=http://data-service:5003
+      - RESULTS_SERVICE=http://results-service:5002
+      - DB_SLAVE_HOST=postgres-data-master
     networks:
       - ualspeed-net
     restart: unless-stopped
 
+  # ── METRICS SERVICE 
   metrics-service:
     container_name: metrics-service
     build:
@@ -83,32 +186,70 @@ services:
     depends_on:
       - postgres-metrics
     environment:
-      - MDB_NAME=${METRICS_POSTGRES_DB}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
+      - MDB_NAME=metrics_db
+      - DB_USER=ualspeed
+      - DB_PASSWORD=ualspeed123
+      - MDB_HOST=postgres-metrics
+      - MDB_PORT=5432
       - MDB_MASTER_HOST=postgres-metrics
       - MDB_SLAVE_HOST=postgres-metrics
-      - MDB_PORT=${DB_PORT}
+      - DB_NAME=metrics_db
     networks:
       - ualspeed-net
     restart: unless-stopped
 
-  postgres-data:
+  # ── BASE DE DADOS RESULTS 
+  postgres-results:
     image: postgres:15
-    container_name: postgres-data
+    container_name: postgres-results
     volumes:
-      - ./data_service/schema.sql:/docker-entrypoint-initdb.d/schema.sql
-      - data_data:/var/lib/postgresql/data
+      - ./results_service/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - results_data:/var/lib/postgresql/data
     restart: always
     environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DDB_POSTGRES_DB}
+      POSTGRES_USER: ualspeed
+      POSTGRES_PASSWORD: ualspeed123
+      POSTGRES_DB: results_db
     ports:
-      - "5434:5432"
+      - "5433:5432"
     networks:
       - ualspeed-net
 
+  # ── BASE DE DADOS DATA (MASTER) 
+  postgres-data-master:
+    image: postgres:15
+    container_name: postgres-data-master
+    volumes:
+      - ./data_service/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - data_master:/var/lib/postgresql/data
+    restart: always
+    environment:
+      POSTGRES_USER: ualspeed
+      POSTGRES_PASSWORD: ualspeed123
+      POSTGRES_DB: data_db
+    ports:
+      - "5440:5432"
+    networks:
+      - ualspeed-net
+
+  # ── BASE DE DADOS DATA (SLAVE/REPLICA)
+  postgres-data-slave:
+    image: postgres:15
+    container_name: postgres-data-slave
+    volumes:
+      - ./data_service/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - data_slave:/var/lib/postgresql/data
+    restart: always
+    environment:
+      POSTGRES_USER: ualspeed
+      POSTGRES_PASSWORD: ualspeed123
+      POSTGRES_DB: data_db
+    ports:
+      - "5441:5432"
+    networks:
+      - ualspeed-net
+
+  # ── BASE DE DADOS METRICS 
   postgres-metrics:
     image: postgres:15
     container_name: postgres-metrics
@@ -117,11 +258,11 @@ services:
       - metrics_data:/var/lib/postgresql/data
     restart: always
     environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${METRICS_POSTGRES_DB}
+      POSTGRES_USER: ualspeed
+      POSTGRES_PASSWORD: ualspeed123
+      POSTGRES_DB: metrics_db
     ports:
-      - "5435:5432"
+      - "5442:5432" 
     networks:
       - ualspeed-net
 
@@ -130,6 +271,12 @@ networks:
     driver: bridge
 
 volumes:
+  redis-data:
+  fastf1-cache:
   results_data:
-  data_data:
+  data_master:
+  data_slave:
   metrics_data:
+  volumes:
+  results_master:
+  results_slave:
